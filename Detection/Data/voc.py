@@ -60,10 +60,9 @@ class VOC2012Module(lightning.LightningDataModule):
 
 
 class VOC2012(Dataset):
-    def __init__(self, root, split: str = "train", box_fmt: str = "cxcywh", transform=None, label_transform:bool=False, **kwargs):
+    def __init__(self, root, split: str = "train", box_fmt: str = "cxcywh", transform=None, **kwargs):
         assert split in {"train", "val"}
         self.transform = transform
-        self.label_transform = label_transform
         self.data = VOCDetection(root, '2012', image_set=split)
         self.out_fmt = box_fmt
         self.classes = {
@@ -111,10 +110,6 @@ class VOC2012(Dataset):
         if self.transform:
             x = self.transform(x)
 
-        if self.label_transform:
-            target = self.labels2yolo(labels, bboxes)
-            return x, target
-
         return x, labels, bboxes
 
     def collate_fn(self, batch):
@@ -131,17 +126,7 @@ class VOC2012(Dataset):
 
         return images, labels, boxes
 
-    def labels2yolo(self, labels, boxes):
-        divisor = 1/7
-        target = torch.zeros((7,7,30))
-
-        for label, (cx,cy,w,h) in zip(labels, boxes):
-            x, y = cx//divisor, cy//divisor
-            x, y = map(int, [x,y])
-            scores = torch.zeros(20)
-            scores[int(label)] = 1
-            target[x,y] = torch.Tensor([cx,cy,w,h,1,0,0,0,0,0,*scores])
-        return target
+    
 
 if __name__ == "__main__":
     data = VOC2012(root="/home/hyperai1/jhsong/Data/VOC", split="train")
