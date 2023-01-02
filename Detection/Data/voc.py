@@ -10,6 +10,7 @@ from torchvision.datasets import VOCDetection
 from torchvision.transforms.autoaugment import AutoAugment
 from torchvision.transforms.functional import InterpolationMode
 
+from Detection.Models import BoundingBox
 import lightning
 
 import numpy as np
@@ -32,8 +33,16 @@ class VOC2012Module(lightning.LightningDataModule):
         self.label_transform = label_transform
 
     def setup(self, stage=None):
-        self.train = VOC2012(self.root, "train", box_fmt=self.box_fmt, transform=self.transform, label_transform=self.label_transform)
-        self.val = VOC2012(self.root, "val", box_fmt=self.box_fmt, transform=self.transform, label_transform=self.label_transform)
+        self.train = VOC2012(
+            self.root, "train", 
+            box_fmt=self.box_fmt, 
+            transform=self.transform, 
+            label_transform=self.label_transform)
+        self.val = VOC2012(
+            self.root, "val", 
+            box_fmt=self.box_fmt, 
+            transform=self.transform, 
+            label_transform=self.label_transform)
 
     def train_transform(self):
         return Compose([
@@ -72,10 +81,6 @@ class VOC2012(Dataset):
             "tvmonitor": 19
         }
         self.indexes = {y: x for x, y in self.classes.items()}
-        if self.transform:
-            self.resize = kwargs['resize']
-
-        # if self.label_transform:
 
     def __len__(self):
         return len(self.data)
@@ -83,57 +88,47 @@ class VOC2012(Dataset):
     def __getitem__(self, idx):
         x, y = self.data[idx]
         y = y['annotation']['object']
+        width,height = x.size
 
         boxes = []
         labels = []
+        difficulties = []
         for i in range(len(y)):
             bbox = y[i]['bndbox']
             labels.append(self.classes[y[i]['name']])
+            difficulties.append(int(y[i]['difficult']))
             box = np.array(
                 [bbox['xmin'], bbox['ymin'], bbox['xmax'], bbox['ymax']],
                 np.int32
             )
             boxes.append(box)
         bboxes = torch.as_tensor(np.array(boxes), dtype=torch.float32)
-
-        width, height = x.size
-
-        # Normalize bounding boxes to get their relative position w.r.t. image size
-        bboxes[:, 0] /= width
-        bboxes[:, 1] /= height
-        bboxes[:, 2] /= width
-        bboxes[:, 3] /= height
-
         bboxes = torchvision.ops.box_convert(bboxes, 'xyxy', self.out_fmt)
         labels = torch.as_tensor(labels, dtype=torch.uint8)
 
         if self.transform:
             x = self.transform(x)
 
-        return x, labels, bboxes
+        bbox = BoundingBox(
+            (width, height), 
+            bboxes, 
+            labels, 
+            difficulties=difficulties, 
+            is_gt=True, 
+            is_relative=False,
+            box_fmt = self.out_fmt
+        )
+
+        return x, bbox
 
     def collate_fn(self, batch):
         images = list()
-        labels = list()
-        boxes = list()
+        bboxes = list()
 
-        for img,label,box in batch:
+        for img,bbox in batch:
             images.append(img)
-            labels.append(label)
-            boxes.append(box)
+            bboxes.append(bbox)
 
         images = torch.stack(images, dim=0)
 
-        return images, labels, boxes
-
-    
-
-if __name__ == "__main__":
-    data = VOC2012(root="/home/hyperai1/jhsong/Data/VOC", split="train")
-    image, labels, boxes = data[3]
-    print("Length of data: ", len(data))
-    print("Example labels: ", [data.indexes[i.item()] for i in labels])
-    print("Example bboxes: ", boxes)
-
-    data = VOC2012(root="/home/hyperai1/jhsong/Data/VOC", split="train", label_transform=True)
-    image, target = data[3]
+        return images, bboxes
