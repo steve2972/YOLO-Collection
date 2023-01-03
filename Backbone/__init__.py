@@ -30,13 +30,13 @@ def load_model(model_name:str="Darknet", load_head:bool=False, pretrained:bool=T
         filepath = os.path.join(os.getcwd(), "Backbone/Weights", f"{model_name}_classifier_model.pt")
         model = torch.load(filepath)
         return model
-    filepath = os.path.join(os.getcwd(), "Backbone/Weights", f"{model_name}.pt")
-    weights_state_dict = torch.load(filepath)
 
     if model_name == "Darknet": model = Darknet(24)
     elif model_name == "Darknet19": model = Darknet(19)
     elif model_name == "Darknet53": model = Darknet(53)
 
     if pretrained:
+        filepath = os.path.join(os.getcwd(), "Backbone/Weights", f"{model_name}.pt")
+        weights_state_dict = torch.load(filepath)
         model.load_state_dict(weights_state_dict)
     return model

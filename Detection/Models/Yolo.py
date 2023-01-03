@@ -1,5 +1,5 @@
 import torch
-from torch import nn
+from torch import nn, Tensor
 
 from Backbone import load_model, ConvBlock
 from typing import Tuple
@@ -7,13 +7,15 @@ from einops.layers.torch import Rearrange
 
 
 class Yolo(nn.Module):
-    def __init__(self,
-                 args,
-                 input_size: Tuple[int, int] = (448, 448),
-                 num_classes: int = 20,
-                 num_bboxes: int = 2,
-                 num_patches: int = 7,
-                 backbone: str = "Darknet"):
+    def __init__(
+        self,
+        args,
+        input_size: Tuple[int, int] = (448, 448),
+        num_classes: int = 20,
+        num_bboxes: int = 2,
+        num_patches: int = 7,
+        backbone: str = "Darknet",
+        pretrained: bool = True):
         super().__init__()
         if not num_classes:
             num_classes = args.classes
@@ -25,7 +27,7 @@ class Yolo(nn.Module):
             backbone = args.backbone
         if not input_size:
             input_size = args.input_size
-        self.backbone = load_model(model_name=backbone, load_head=False, pretrained=True)
+        self.backbone = load_model(model_name=backbone, load_head=False, pretrained=pretrained)
 
         self.conv = nn.Sequential(
             ConvBlock(1024, 1024, 3, 1, 'same', 'leaky'),
@@ -41,7 +43,13 @@ class Yolo(nn.Module):
         self.sigmoid = nn.Sigmoid()
         self.reshape = Rearrange('b (p1 p2 o) -> b p1 p2 o', p1=num_patches, p2=num_patches, o=outs)
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        Args:
+            x: (Tensor) input image of size [n_batch, 3, img_width, img_height]
+        Returns:
+            (Tensor): resized output with size (n_batch, S, S, B x 5 + C)
+        """
         x = self.backbone(x)
         x = self.conv(x)
         x = self.flatten(x)

@@ -1,10 +1,12 @@
 import torch
-from torch import nn
+from torch import nn, Tensor
 from Detection.Utils.utils import compute_iou
+from Detection.Models import BoundingBox
+from typing import List
 
 # ------------- YOLO version 1 Loss ---------------- #
 
-class YOLOV1Loss(nn.Module):
+class YOLOv1Loss(nn.Module):
     def __init__(self, 
         patch_size:int=7, 
         num_bboxes:int=2, 
@@ -20,21 +22,23 @@ class YOLOV1Loss(nn.Module):
             lambda_coord: (float) penalty term for boxes containing objects
             lambda_noobj: (float) penalty term for boxes not containing objects
         """
+        super().__init__()
         self.S = patch_size
         self.B = num_bboxes
         self.C = num_classes
         self.lambda_coord = lambda_coord
         self.lambda_noobj = lambda_noobj
 
-
-    def forward(self,x:torch.Tensor, y:torch.Tensor):
+    def forward(self, x:Tensor, boxes:List[BoundingBox]):
         """
         Args:
-            x: (Tensor) YOLO output, sized [batch, S, S, Bx5+C] where 5=[cx,cy,w,h,conf]
-            y: (Tensor) targets, sized [batch, S, S, Bx5+C]
+            x: (Tensor) YOLO output, sized [n_batch, S, S, Bx5+C] where 5=[cx,cy,w,h,conf]
+            boxes: (List[BoundingBox]) List of BoundingBoxes with length of list=n_batch
         Returns:
-            (Tensor): loss, sized [1, ]
+            (Tensor): loss, sized [1,]
         """
+        y = torch.stack([box.get_boxes("yolo") for box in boxes], dim = 0)
+
         S = self.S
         B = self.B
         C = self.C
@@ -42,8 +46,8 @@ class YOLOV1Loss(nn.Module):
         lambda_noobj = self.lambda_noobj
         
         N = 5 * B + C
-
-        batch_size = x.size(0)
+        
+        batch_size = x.shape[0]
         coord_mask = y[...,4] > 0   # mask for the cells which contain objects. [batch, S, S]
         noobj_mask = y[...,4] == 0  # mask for the cells which do not contain objects. [batch, S, S]
 

@@ -47,8 +47,7 @@ class BoundingBox:
         self.difficulties = difficulties
         self.gt = is_gt
         self.width, self.height = image_size[0], image_size[1]
-        
-
+         
     def get_area(self):
         """ Computes the area of the set of bounding boxes.
         
@@ -63,6 +62,20 @@ class BoundingBox:
         else:
             area = ops.box_area(self.bboxes)
         return area
+
+    def get_boxes(self, box_fmt:str=None):
+        if box_fmt is None:
+            box_fmt = self.cur_format
+        self.convert_boxtype(box_fmt)
+        return self.bboxes
+
+    def get_info(self, box_fmt:str=None):
+        if box_fmt is None:
+            box_fmt = self.cur_format
+        self.convert_boxtype(box_fmt)
+        
+        scores = self.difficulties if self.gt else self.confidence
+        return self.bboxes, self.labels, scores
 
     def change_relative(self):
         # Converts abolute boxes to relative format or vice versa.
@@ -157,7 +170,6 @@ class BoundingBox:
 
         return target
 
-    
     def decode_yolo(
         self, S:int=7, B:int=2, C:int=20,
         conf_thresh:float = 0.1,
