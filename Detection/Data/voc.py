@@ -17,36 +17,32 @@ import numpy as np
 
 
 class VOC2012Module(lightning.LightningDataModule):
-    def __init__(self, args, box_fmt: str = "cxcywh", resize_size: int = 448, crop_size: int = 224, label_transform:bool=False):
+    def __init__(self, args, box_fmt: str = "cxcywh", resize_size: int = 448):
         super().__init__()
         self.args = args
         self.root = "/home/hyperai1/jhsong/Data/VOC"
         self.mean = [0.485, 0.456, 0.406]
         self.std = [0.229, 0.224, 0.225]
         self.interpolation = InterpolationMode.BILINEAR
-        self.resize_size = resize_size
-        self.crop_size = crop_size
+        self.resize_size = (resize_size, resize_size)
         self.box_fmt = box_fmt
 
         self.transform = self.train_transform()
         self.val_transform = self.val_transform()
-        self.label_transform = label_transform
 
     def setup(self, stage=None):
         self.train = VOC2012(
             self.root, "train", 
             box_fmt=self.box_fmt, 
-            transform=self.transform, 
-            label_transform=self.label_transform)
+            transform=self.transform)
         self.val = VOC2012(
             self.root, "val", 
             box_fmt=self.box_fmt, 
-            transform=self.transform, 
-            label_transform=self.label_transform)
+            transform=self.transform)
 
     def train_transform(self):
         return Compose([
-            Resize(self.crop_size, interpolation=self.interpolation),
+            Resize(self.resize_size, interpolation=self.interpolation),
             AutoAugment(),
             PILToTensor(),
             ConvertImageDtype(torch.float),
@@ -105,6 +101,7 @@ class VOC2012(Dataset):
         bboxes = torch.as_tensor(np.array(boxes), dtype=torch.float32)
         bboxes = torchvision.ops.box_convert(bboxes, 'xyxy', self.out_fmt)
         labels = torch.as_tensor(labels, dtype=torch.uint8)
+        difficulties = torch.as_tensor(difficulties, dtype=torch.uint8)
 
         if self.transform:
             x = self.transform(x)

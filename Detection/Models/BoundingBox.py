@@ -14,7 +14,8 @@ class BoundingBox:
         difficulties: Optional[Tensor] = None,
         is_gt: bool = False,
         is_relative: bool = True,
-        box_fmt: str="cxcywh"
+        box_fmt: str="cxcywh",
+        device="cuda"
         ) -> None:
         """ Initializes a BoundingBox object for a single image.
 
@@ -35,8 +36,6 @@ class BoundingBox:
         avail_formats = {"xyxy", "xywh", "cxcywh", "yolo"}
         if box_fmt not in avail_formats:
             raise ValueError(f"Parameter box_fmt must be one of {avail_formats} but received {box_fmt}.")
-        if is_gt: assert difficulties
-        else: assert confidence
 
         self.cur_format = box_fmt
         self.relative = is_relative
@@ -46,7 +45,11 @@ class BoundingBox:
         self.confidence = confidence
         self.difficulties = difficulties
         self.gt = is_gt
-        self.width, self.height = image_size[0], image_size[1]
+        if image_size != None:
+            self.width, self.height = image_size[0], image_size[1]
+        else:
+            self.width = self.height = 448
+        self.device = device
          
     def get_area(self):
         """ Computes the area of the set of bounding boxes.
@@ -141,13 +144,13 @@ class BoundingBox:
             self.change_relative()
         self.convert_boxtype("cxcywh")
 
-        target = torch.zeros((S,S,5*B+C))
+        target = torch.zeros((S,S,5*B+C), device=self.device)
 
         num_boxes = self.bboxes.shape[0]
-        arange = torch.arange(num_boxes)
-        ret = torch.zeros((num_boxes, 5*B+C))
+        arange = torch.arange(num_boxes, device=self.device)
+        ret = torch.zeros((num_boxes, 5*B+C), device=self.device)
 
-        labels = torch.Tensor(self.labels).to(torch.long)
+        labels = self.labels.clone().to(torch.long)
         labels += 5*B   # Bounding box offset for class labels
         
         # ret in the format of [cx, cy, w, h, 1, 0*5, class indexes *20]
@@ -159,8 +162,8 @@ class BoundingBox:
 
         relative_xy = r - idxs
 
-        ret[arange, :2] = relative_xy
-        ret[arange,2:4] = self.bboxes[:,2:4]
+        ret[arange, :2] = relative_xy.to(self.device)
+        ret[arange,2:4] = self.bboxes[:,2:4].to(self.device)
         ret[arange,  4] = 1
         
         x,y = idxs[:,0], idxs[:,1]
@@ -190,10 +193,10 @@ class BoundingBox:
         assert self.relative    # Bounding boxes must be in relative format
         boxes, labels, confidences, cls_scores = [],[],[],[]
         preds = self.bboxes
-        indexes = torch.zeros((S,S,2))  # Torch tensor of indexes (to calculate absolute position)
+        indexes = torch.zeros((S,S,2), device=self.device)  # Torch tensor of indexes (to calculate absolute position)
         for i in range(S):
             for j in range(S):
-                indexes[i,j] = torch.Tensor([i,j]).to(torch.long)
+                indexes[i,j] = torch.tensor([i,j], device=self.device).to(torch.long)
 
         # n_obj = number of objects with confidence exceeding conf_thresh
         for b in range(B):
@@ -206,7 +209,7 @@ class BoundingBox:
             masked_indexes=indexes[conf_index_mask].view(-1,2)      # [n_obj, 2]
 
             class_score, class_label = torch.max(
-                masked_preds[...,5*B:], -1)                         # [n_obj,], [n_obj,]
+                masked_preds[...,5*B:], -1)     # [n_obj,], [n_obj,]
             conf_scores = masked_preds[...,b*5+4]                   # [n_obj,]
 
             # Get objects with object probability > threshold => n_prob
@@ -226,11 +229,9 @@ class BoundingBox:
             # Note that cx,cy are normalized to the cell-size, not the entire image.
             # Thus, we normalize the coords from 0 to 1.0 w.r.t. image width/height
             xy_normalized = (bboxes[...,:2] + masked_indexes) / S
-            pred_xyxy = torch.zeros_like(bboxes)
+            pred_xyxy = torch.zeros_like(bboxes, device=self.device)
             pred_xyxy[...,:2] = xy_normalized
             pred_xyxy[...,2:4] = bboxes[...,2:4]
-            # pred_xyxy[...,:2] = bboxes[...,:2]/float(S) - 0.5 * bboxes[...,2:4]
-            # pred_xyxy[...,2:4] = bboxes[...,:2]/float(S) + 0.5 * bboxes[...,2:4]
 
             # Append the results to the lists
             boxes.append(pred_xyxy)

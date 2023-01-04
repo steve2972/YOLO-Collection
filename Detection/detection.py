@@ -3,10 +3,8 @@ from torchmetrics.detection.mean_ap import MeanAveragePrecision
 import lightning
 
 from Detection.Models import Yolo, BoundingBox
-from Detection.Metrics.loss import YOLOV1Loss as Loss
+from Detection.Metrics.loss import YOLOv1Loss as Loss
 from Detection.Metrics.metrics import calculate_voc_mAP
-from Detection.Utils.utils import decode_yolov1 as decode
-from Detection.Utils.utils import label_boxes_convert
 from Utils import optim
 
 from typing import Tuple
@@ -16,7 +14,7 @@ class YoloModule(lightning.LightningModule):
     """ YOLO version 1 Module"""
     def __init__(
             self,
-            args,
+            args = None,
             input_size: Tuple[int, int] = (448, 448),
             num_classes: int = 20,
             num_bboxes: int = 2,
@@ -35,6 +33,7 @@ class YoloModule(lightning.LightningModule):
         )
         self.criterion = Loss(num_patches, num_bboxes, num_classes)
         self.mAP = MeanAveragePrecision(box_format="cxcywh")
+        self.args = args
 
     def forward(self, x):
         x = self.model(x)
@@ -55,18 +54,19 @@ class YoloModule(lightning.LightningModule):
             loss,
             on_step=True,
             on_epoch=True,
-            prog_bar=True
+            prog_bar=True,
+            batch_size=x.shape[0]
         )
 
         pred_boxes = [BoundingBox(None, pred, None, box_fmt="yolo") for pred in preds]
-        _, mAP = calculate_voc_mAP(pred_boxes, boxes)
+        _, mAP = calculate_voc_mAP(pred_boxes, boxes, device="cuda")
 
         self.log(
             f"{prefix}/mAP", 
             mAP,
             on_step=True,
             on_epoch=True,
-            prog_bar=True
+            prog_bar=True, batch_size=x.shape[0]
         )
         return loss
 
