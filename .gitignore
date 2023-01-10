@@ -32,6 +32,7 @@ wandb-summary.json
 latest-run
 *.yaml
 requirements.txt
+events.out.tfevents.*
 
 # Cached python files
 ######################
