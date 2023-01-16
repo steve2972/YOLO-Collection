@@ -1,4 +1,5 @@
 # Current TODO
 
 - Finish training code for YOLOv1
-  - Implement bounding box
+  - speed up mAP calculation
+  - figure out what the bottleneck is in mAP calcualtion 
