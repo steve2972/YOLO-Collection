@@ -32,7 +32,7 @@ class YoloModule(lightning.LightningModule):
             num_patches=self.S
         )
         self.criterion = Loss(num_patches, num_bboxes, num_classes)
-        self.mAP = MeanAveragePrecision(box_format="cxcywh")
+        self.mAP = MeanAveragePrecision()
         self.args = args
 
     def forward(self, x):
@@ -46,28 +46,37 @@ class YoloModule(lightning.LightningModule):
         return [optimizer], [lr_scheduler]
 
     def training_step(self, batch, batch_idx, prefix="train"):
+        """
+            x: (Tensor)
+            boxes: (List[BoundingBox])
+        """
         x, boxes = batch
-        preds = self(x)
-        loss = self.criterion(preds, boxes)
+        y = self(x)
+        loss = self.criterion(y, boxes)
         self.log(
-            f"{prefix}/loss", 
+            f"{prefix}_loss", 
             loss,
-            on_step=True,
             on_epoch=True,
             prog_bar=True,
             batch_size=x.shape[0]
         )
 
-        pred_boxes = [BoundingBox(None, pred, None, box_fmt="yolo") for pred in preds]
-        _, mAP = calculate_voc_mAP(pred_boxes, boxes, device="cuda")
 
-        self.log(
-            f"{prefix}/mAP", 
-            mAP,
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True, batch_size=x.shape[0]
-        )
+        if prefix == "val":
+            preds = [BoundingBox(None, pred, None, box_fmt="yolo") for pred in y]
+            preds = [box.get_dict("xyxy") for box in preds]
+            target= [box.get_dict("xyxy") for box in boxes]
+
+            self.mAP.update(preds=preds, target=target)
+
+            mAPs = {
+                f"{prefix}_" + k: v.item() for k, v 
+                in self.mAP.compute().items() 
+                if k.startswith('map')
+            }
+
+            self.log_dict(mAPs, sync_dist=True,batch_size=x.shape[0])
+            self.mAP.reset()
         return loss
 
     def validation_step(self, batch, batch_idx):

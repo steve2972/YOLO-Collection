@@ -7,7 +7,7 @@ parser = argparse.ArgumentParser(description="YOLO Backbone Training", add_help=
 parser.add_argument("--data-path", default="/home/hyperai1/jhsong/Data/ImageNet", type=str, help="dataset path")
 parser.add_argument("--model", default=1, type=int, help="Darknet version [0: Tiny, 1: Darknet24, 2: Darknet19, 3:Darknet53 ]")
 parser.add_argument("--device", default="gpu", type=str, help="Type of accelerator (Use cpu, gpu, tpu, etc.)")
-parser.add_argument("--gpus", default=1, type=int, help="Number of GPUs to use")
+parser.add_argument("--gpus", default=4, type=int, help="Number of GPUs to use")
 
 parser.add_argument("--test-only", dest="test_only", help="Only test the model", action="store_true",)
 parser.add_argument("--activation", default="leaky", type=str, help="Model non-linear activation function")
@@ -24,7 +24,7 @@ parser.add_argument("--crop", default=448, type=int, help="Random crop image pix
 
 # TRAINING PARAMETERS
 parser.add_argument("-b", "--batch-size", default=64, type=int, help="images per gpu")
-parser.add_argument("--epochs", default=100, type=int, metavar="N", help="number of total epochs to run")
+parser.add_argument("--epochs", default=200, type=int, metavar="N", help="number of total epochs to run")
 parser.add_argument(
     "-j", "--workers", default=1, type=int, metavar="N", help="number of data loading workers (default: 1)"
 )
@@ -53,10 +53,10 @@ parser.add_argument("--lr-min", default=1e-5, type=float, help="minimum lr of lr
 
 # LOGGING
 parser.add_argument("--wandb",  help="use wandb for logging", action="store_true")
-parser.add_argument("--wandb-id", type=str, help="unique ID for wandb logging")
+parser.add_argument("--wandb-id", type=str, default="yolov1", help="unique ID for wandb logging")
 
 parser.add_argument("--log-freq", default=50, type=int, help="log frequency")
-parser.add_argument("--output-dir", default=".", type=str, help="path to save outputs")
+parser.add_argument("--output-dir", default="./Logs", type=str, help="path to save outputs")
 parser.add_argument("--resume",  default=None, type=str, help="path to save outputs")
 
 args = parser.parse_args()

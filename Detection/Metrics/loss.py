@@ -1,4 +1,6 @@
 import torch
+import torchvision
+
 from torch import nn, Tensor
 from Detection.Utils.utils import compute_iou
 from Detection.Models import BoundingBox
@@ -13,7 +15,8 @@ class YOLOv1Loss(nn.Module):
         num_bboxes:int=2, 
         num_classes:int=20,
         lambda_coord:float=5, 
-        lambda_noobj:float=0.5):
+        lambda_noobj:float=0.5,
+        device:str="cuda"):
         """ Computes YOLO v1. loss for training. 
         NOTE: This module only works on CUDA GPUs. 
         TODO: Implement CPU usage
@@ -31,6 +34,12 @@ class YOLOv1Loss(nn.Module):
         self.C = num_classes
         self.lambda_coord = lambda_coord
         self.lambda_noobj = lambda_noobj
+        self.indexes = torch.zeros((patch_size, patch_size, 2), device=device)
+        for i in range(patch_size):
+            for j in range(patch_size):
+                self.indexes[i,j] = torch.tensor([i,j]).to(torch.long)
+
+        self.device = device
 
 
     def forward(self, x:Tensor, boxes:List[BoundingBox]):
@@ -42,6 +51,7 @@ class YOLOv1Loss(nn.Module):
             (Tensor): loss, sized [1,]
         """
         boxes = deepcopy(boxes)
+        indexes = torch.stack([self.indexes for _ in range(x.shape[0])], dim=0).to(self.device)
         y = torch.stack([box.get_boxes("yolo") for box in boxes], dim = 0)
 
         S = self.S
@@ -56,44 +66,54 @@ class YOLOv1Loss(nn.Module):
         coord_mask = y[...,4] > 0   # mask for the cells which contain objects. [batch, S, S]
         noobj_mask = y[...,4] == 0  # mask for the cells which do not contain objects. [batch, S, S]
 
+        # [batch, S, S] -> [batch, S, S, 2]
+        coord_mask_idx = coord_mask.unsqueeze(-1).expand_as(indexes)
+
         # [batch, S, S] -> [batch, S, S, N]
         coord_mask = coord_mask.unsqueeze(-1).expand_as(y)
         noobj_mask = noobj_mask.unsqueeze(-1).expand_as(y)
 
+
         # -------Format predictions --------#
         # n_obj = number of cells which contain objects
-        coord_pred = x[coord_mask].view(-1, N).cuda() # prediction tensor on the cells which contain objects. [n_obj, N]
-        bbox_pred = coord_pred[:, :5*B].contiguous().view(-1,5).cuda()     # [n_obj x B, 5]
-        class_pred= coord_pred[:, 5*B:].cuda()                             # [n_obj, C]
+        coord_pred = x[coord_mask].view(-1, N) # prediction tensor on the cells which contain objects. [n_obj, N]
+        bbox_pred = coord_pred[:, :5*B].contiguous().view(-1,5)     # [n_obj x B, 5]
+        class_pred= coord_pred[:, 5*B:]                             # [n_obj, C]
 
-        coord_target = y[coord_mask].view(-1, N).cuda()   # target tensor on the cells which contain objects
-        bbox_target = coord_target[:, :5*B].contiguous().view(-1,5).cuda() # [n_obj x B, 5]
-        class_target = coord_target[:, 5*B:].cuda()                        # [n_obj, C]
+        coord_target = y[coord_mask].view(-1, N)   # target tensor on the cells which contain objects
+        bbox_target = coord_target[:, :5*B].contiguous().view(-1,5) # [n_obj x B, 5]
+        class_target = coord_target[:, 5*B:]                        # [n_obj, C]
+
+        coord_idx= indexes[coord_mask_idx].view(-1, 2) # indexes on SxS grid of the cells which contaion objects. [n_obj, 2]
 
         # -------Compute loss for the cells with objects --------#
-        coord_response_mask = torch.zeros_like(bbox_target, dtype=torch.bool).cuda()
-        coord_not_response_mask = torch.zeros_like(bbox_target, dtype=torch.bool).cuda()
-        bbox_target_iou = torch.zeros_like(bbox_target).cuda()
+        coord_response_mask = torch.zeros_like(bbox_target, dtype=torch.bool)
+        coord_not_response_mask = torch.zeros_like(bbox_target, dtype=torch.bool)
+        bbox_target_iou = torch.zeros_like(bbox_target)
 
         # Choose the predicted bbox having the highest IoU for each target box
-        for i in range(0, bbox_target.size(0), B):
-            pred = bbox_pred[i:i+B].cuda()             # Predicted bboxes at i-th cell, [B, 5]
-            pred_xyxy = torch.zeros_like(pred)  # [B, 5=[x1,y1,x2,y2,conf]]
+        for idx, i in enumerate(range(0, bbox_target.size(0), B)):
             """
-            Note that (center_x,center_y)=pred[:,2] and (w,h)=pred[:,2:4] are normalized for
+            Note that (center_x,center_y)=pred[:,:2] and (w,h)=pred[:,2:4] are normalized for
             cell-size and image-size respectively.
             Thus, we need to rescale(center_x, center_y) to the image-size to correctly calculate
             the IoU.        
             """
-            pred_xyxy[:,  :2] = pred[:, :2]/float(S) - 0.5 * pred[:, 2:4]
-            pred_xyxy[:, 2:4] = pred[:, :2]/float(S) + 0.5 * pred[:, 2:4]
+            pred = bbox_pred[i:i+B]             # Predicted bboxes at i-th cell, [B, 5]
+            pred_xyxy =  pred                   # [B, 5=[x1,y1,x2,y2,conf]]
+            target = bbox_target[i].view(-1,5)  # [1, 5=[x1,y1,x2,y2,conf]]
+            target_xyxy = target
+            box_idx = coord_idx[idx]            # [1, 2]
+            
+            pred_xyxy[:,:2] = (pred_xyxy[:, :2] + box_idx) / float(S) # now in xywh format
+            pred_xyxy = torchvision.ops.box_convert(pred_xyxy[:,:4], in_fmt='cxcywh', out_fmt='xyxy')
+            pred_xyxy = torch.clamp(pred_xyxy, 0, 1)
 
-            target = bbox_target[i].view(-1,5)      # [1, 5=[x1,y1,x2,y2,conf]]
-            target_xyxy = torch.zeros_like(target)  # [1, 5=[x1,y1,x2,y2,conf]]
-            target_xyxy[:,  :2] = target[:, :2]/float(S) - 0.5 * target[:, 2:4]
-            target_xyxy[:, 2:4] = target[:, :2]/float(S) + 0.5 * target[:, 2:4]
+            target_xyxy[:,:2] = (target_xyxy[:, :2] + box_idx) / float(S)
+            target_xyxy = torchvision.ops.box_convert(target_xyxy[:,:4], 'cxcywh', 'xyxy')
+            target_xyxy = torch.clamp(target_xyxy, 0, 1)
 
-            iou = compute_iou(pred_xyxy[:,:4], target_xyxy[:,:4]) # [B, 1]
+            iou = compute_iou(pred_xyxy, target_xyxy) # [B, 1]
             max_iou, max_idx = iou.max(0)
             max_idx = max_idx.item()
 
@@ -122,9 +142,9 @@ class YOLOv1Loss(nn.Module):
         # -------Compute loss for the cells with no object bbox --------#
 
         # n_noobj = SxS - n_obj = number of cells which do not contain objects
-        noobj_pred = x[noobj_mask].view(-1,N).cuda()   # pred tensor on the cells which do not contain objects
-        noobj_target=y[noobj_mask].view(-1,N).cuda()   # target tensor on the cells which do not contain objects
-        noobj_conf_mask = torch.zeros_like(noobj_pred, dtype=torch.bool).cuda() # [n_noobj, N]
+        noobj_pred = x[noobj_mask].view(-1,N)   # pred tensor on the cells which do not contain objects
+        noobj_target=y[noobj_mask].view(-1,N)   # target tensor on the cells which do not contain objects
+        noobj_conf_mask = torch.zeros_like(noobj_pred, dtype=torch.bool) # [n_noobj, N]
         for b in range(B):
             # for each bounding box
             noobj_conf_mask[:, 4+b*5] = 1       # noobj_conf_mask[:,4] and noobj_conf_mask[:,9] = 1

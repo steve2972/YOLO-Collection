@@ -72,13 +72,33 @@ class BoundingBox:
         self.convert_boxtype(box_fmt)
         return self.bboxes
 
-    def get_info(self, box_fmt:str=None):
+    def get_dict(self, box_fmt:str=None, relative:bool=False):
+        """ Formats the bounding box into a dictionary
+        Returns:
+            (Dict[string: torch.Tensor])
+            boxes: FloatTensor of shape [n, 4] containing n detection boxes of the format specified.
+            scores: FloatTensor of shape [n] containing detection scores for the boxes.
+            labels: IntTensor of shape [n] containing 0-indexed detection classes for the boxes.
+        """
         if box_fmt is None:
             box_fmt = self.cur_format
+        avail = {"xyxy", "xywh", "cxcywh"}
+        if box_fmt not in avail:
+            raise NameError(f"Dictionary format accepts {avail}. Received {box_fmt}")
         self.convert_boxtype(box_fmt)
-        
-        scores = self.difficulties if self.gt else self.confidence
-        return self.bboxes, self.labels, scores
+        assert self.labels != None
+        assert self.bboxes != None
+
+        if relative != self.relative:
+            self.change_relative()
+        ret = {
+            "boxes": self.bboxes.to(device=self.device),
+            "labels": self.labels.to(device=self.device)
+        }
+        if not self.gt:
+            ret["scores"] = self.confidence.to(device=self.device)
+        return ret
+
 
     def change_relative(self):
         # Converts abolute boxes to relative format or vice versa.
@@ -86,20 +106,18 @@ class BoundingBox:
         if cur_format == "yolo":
             raise RuntimeError("Box format of 'yolo' must be relative")
         self.convert_boxtype("xyxy")
+        wh = torch.tensor([self.width, self.height, self.width, self.height], device=self.device)
+        self.bboxes = self.bboxes.to(self.device)
         if self.relative:
             # Change boxes to absolute values
-            self.bboxes[:,0] *= self.width
-            self.bboxes[:,1] *= self.height
-            self.bboxes[:,2] *= self.width
-            self.bboxes[:,3] *= self.height
+            self.bboxes *= wh
+            self.bboxes = torch.clamp(self.bboxes, min=torch.zeros_like(wh, device=self.device), max=wh)
             self.relative = False
         
         else:
             # Change boxes to relative values
-            self.bboxes[:,0] /= self.width
-            self.bboxes[:,1] /= self.height
-            self.bboxes[:,2] /= self.width
-            self.bboxes[:,3] /= self.height
+            self.bboxes /= wh
+            self.bboxes = torch.clamp(self.bboxes, min=0, max=1)
             self.relative = True
 
         self.convert_boxtype(cur_format)
@@ -175,14 +193,10 @@ class BoundingBox:
 
     def decode_yolo(
         self, S:int=7, B:int=2, C:int=20,
-        conf_thresh:float = 0.1,
-        prob_thresh:float = 0.1,
+        conf_thresh:float = 0,
+        prob_thresh:float = 0,
         ):
         """ Decode YOLO v1 tensor into box coordinates, class labels, and probs_detected. (Single Image Use-Case)
-        Args:
-            preds: (tensor) tensor to decode sized [S, S, 5 x B + C], 5=(x, y, w, h, conf)
-            from_predicted: (bool) whether predictions are from a YOLO model. Determines
-                            whether to normalize the bboxes.
         Returns:
             boxes: (tensor) [[x1, y1, x2, y2]_obj1, ...]. Normalized from 0.0 to 1.0 w.r.t. 
                     image width/height, sized [n_boxes, 4].
