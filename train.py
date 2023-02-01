@@ -1,17 +1,16 @@
-import os
-import torch
 import lightning
 import wandb
 from pytorch_lightning.loggers import WandbLogger
 
 from Utils.parse_detection import args
 from Detection.detection import YoloModule
-from Detection.Data.voc import VOC2012Module
+from Detection.Data.voc import VOCModule
 
 def main():
     # Initialize data and model
     model = YoloModule(args)
-    data_loader = VOC2012Module(args)
+    # model = YoloModule.load_from_checkpoint("Logs/checkpoints/epoch=2-step=270.ckpt", args=args)
+    data_loader = VOCModule(args)
     
     # Trainer specifications
     if args.resume: 

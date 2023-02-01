@@ -4,6 +4,13 @@ from torchvision import ops
 
 from typing import Optional, Tuple
 
+voc_labels = (
+    'aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 
+    'bus', 'car', 'cat', 'chair', 'cow', 'diningtable',
+    'dog', 'horse', 'motorbike', 'person', 'pottedplant', 
+    'sheep', 'sofa', 'train', 'tvmonitor'
+)
+
 class BoundingBox:
     def __init__(
         self,
@@ -72,8 +79,12 @@ class BoundingBox:
         self.convert_boxtype(box_fmt)
         return self.bboxes
 
-    def get_dict(self, box_fmt:str=None, relative:bool=False):
+    def get_dict(self, box_fmt:str=None, relative:bool=False, nms:bool=False):
         """ Formats the bounding box into a dictionary
+        Args:
+            box_fmt: (string) one of xyxy, xywh, cxcywh
+            relative: (boolean) toggles absolute/relative positions of coordinates
+            nms: (boolean) toggles applying non-max suppression on bboxes
         Returns:
             (Dict[string: torch.Tensor])
             boxes: FloatTensor of shape [n, 4] containing n detection boxes of the format specified.
@@ -91,12 +102,27 @@ class BoundingBox:
 
         if relative != self.relative:
             self.change_relative()
-        ret = {
-            "boxes": self.bboxes.to(device=self.device),
-            "labels": self.labels.to(device=self.device)
-        }
+
+        boxes = self.bboxes.to(device=self.device)
+        labels = self.labels.to(device=self.device)
+
         if not self.gt:
-            ret["scores"] = self.confidence.to(device=self.device)
+            scores = self.confidence.to(device=self.device)
+            if nms:
+                # Default iou_threshold = 0.65
+                idxs = ops.nms(boxes, scores, iou_threshold=0.65)
+                boxes = boxes[idxs]
+                labels = labels[idxs]
+                scores = scores[idxs]
+        else:
+            scores = self.difficulties.to(device=self.device)
+        
+        ret = {
+            "boxes": boxes,
+            "labels": labels,
+            "scores": scores
+        }
+        
         return ret
 
 
@@ -133,7 +159,8 @@ class BoundingBox:
         if self.cur_format == out_fmt:
             return
         if self.cur_format == "yolo":
-            n_boxes, n_labels, n_confidences, _ = self.decode_yolo()
+            assert self.relative
+            n_boxes, n_labels, n_confidences, _ = self.decode_yolo(self.bboxes, device=self.device)
             self.bboxes = n_boxes
             self.labels = n_labels
             self.confidence = n_confidences
@@ -191,10 +218,12 @@ class BoundingBox:
 
         return target
 
+    @staticmethod
     def decode_yolo(
-        self, S:int=7, B:int=2, C:int=20,
-        conf_thresh:float = 0,
-        prob_thresh:float = 0,
+        preds, S:int=7, B:int=2, C:int=20,
+        conf_thresh:float = 0.1,
+        prob_thresh:float = 0.1,
+        device:str = 'cuda'
         ):
         """ Decode YOLO v1 tensor into box coordinates, class labels, and probs_detected. (Single Image Use-Case)
         Returns:
@@ -204,13 +233,11 @@ class BoundingBox:
             confidences: (tensor) objectness confidences for each detected box, sized [n_boxes,].
             cls_scores: (tensor) scores for most likely class for each detected box, sized [n_boxes,].
         """
-        assert self.relative    # Bounding boxes must be in relative format
         boxes, labels, confidences, cls_scores = [],[],[],[]
-        preds = self.bboxes
-        indexes = torch.zeros((S,S,2), device=self.device)  # Torch tensor of indexes (to calculate absolute position)
+        indexes = torch.zeros((S,S,2), device=device)  # Torch tensor of indexes (to calculate absolute position)
         for i in range(S):
             for j in range(S):
-                indexes[i,j] = torch.tensor([i,j], device=self.device).to(torch.long)
+                indexes[i,j] = torch.tensor([i,j], device=device).to(torch.long)
 
         # n_obj = number of objects with confidence exceeding conf_thresh
         for b in range(B):
@@ -243,7 +270,7 @@ class BoundingBox:
             # Note that cx,cy are normalized to the cell-size, not the entire image.
             # Thus, we normalize the coords from 0 to 1.0 w.r.t. image width/height
             xy_normalized = (bboxes[...,:2] + masked_indexes) / S
-            pred_xyxy = torch.zeros_like(bboxes, device=self.device)
+            pred_xyxy = torch.zeros_like(bboxes, device=device)
             pred_xyxy[...,:2] = xy_normalized
             pred_xyxy[...,2:4] = bboxes[...,2:4]
 
@@ -271,12 +298,7 @@ class BoundingBox:
         return len(self.labels)
 
     def __str__(self) -> str:
-        voc_labels = (
-            'aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 
-            'bus', 'car', 'cat', 'chair', 'cow', 'diningtable',
-            'dog', 'horse', 'motorbike', 'person', 'pottedplant', 
-            'sheep', 'sofa', 'train', 'tvmonitor'
-        )
+        
         if self.cur_format == "yolo":
             bboxes = self.bboxes[...,:4]
         else: bboxes = self.bboxes

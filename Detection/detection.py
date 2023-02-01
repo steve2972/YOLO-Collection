@@ -1,12 +1,9 @@
-import torch
-from torchmetrics.detection.mean_ap import MeanAveragePrecision
-import lightning
-
 from Detection.Models import Yolo, BoundingBox
 from Detection.Metrics.loss import YOLOv1Loss as Loss
 from Detection.Metrics.metrics import calculate_voc_mAP
 from Utils import optim
 
+import lightning
 from typing import Tuple
 
 
@@ -32,7 +29,6 @@ class YoloModule(lightning.LightningModule):
             num_patches=self.S
         )
         self.criterion = Loss(num_patches, num_bboxes, num_classes)
-        self.mAP = MeanAveragePrecision()
         self.args = args
 
     def forward(self, x):
@@ -56,27 +52,51 @@ class YoloModule(lightning.LightningModule):
         self.log(
             f"{prefix}_loss", 
             loss,
-            on_epoch=True,
             prog_bar=True,
+            sync_dist=True,
             batch_size=x.shape[0]
         )
 
-
+        preds = [BoundingBox(None, pred, None, box_fmt="yolo") for pred in y]
+        preds = [box.get_dict("xyxy") for box in preds]
+        target= [box.get_dict("xyxy") for box in boxes]
+        ap, mAP = calculate_voc_mAP(preds, target, device="cuda")
         if prefix == "val":
-            preds = [BoundingBox(None, pred, None, box_fmt="yolo") for pred in y]
-            preds = [box.get_dict("xyxy") for box in preds]
-            target= [box.get_dict("xyxy") for box in boxes]
+            self.log_dict(ap, batch_size=x.shape[0])
+        self.log(
+            f"{prefix}_mAP", 
+            mAP, 
+            on_epoch=True,
+            on_step=True,
+            prog_bar=True, 
+            sync_dist=True, 
+            batch_size=x.shape[0]
+        )
 
-            self.mAP.update(preds=preds, target=target)
+        if batch_idx % 10 == 0 and self.args.verbose:
+            self.print("\n\n#", "="*20, "PREDICTION", "="*20,  "#")
+            tmp = preds[0]
+            bboxes = tmp['boxes']
+            labels = tmp['labels']
+            scores = tmp['scores']
+            self.print(f"bboxes: {bboxes.tolist()}")
+            self.print(f"labels: {labels.tolist()}")
+            self.print(f"confidence: {scores.tolist()}")
 
-            mAPs = {
-                f"{prefix}_" + k: v.item() for k, v 
-                in self.mAP.compute().items() 
-                if k.startswith('map')
-            }
+            self.print("#", "="*20, "GROUNDTRUTH", "="*20,  "#")
+            tmp = target[0]
+            bboxes = tmp['boxes']
+            labels = tmp['labels']
+            scores = tmp['scores']
+            self.print(f"bboxes: {bboxes.tolist()}")
+            self.print(f"labels: {labels.tolist()}")
+            self.print(f"difficulty: {scores.tolist()}")
 
-            self.log_dict(mAPs, sync_dist=True,batch_size=x.shape[0])
-            self.mAP.reset()
+            self.print("#", "="*20, "MEAN AVERAGE PRECISION: ", mAP, "="*20,  "#")
+
+
+
+
         return loss
 
     def validation_step(self, batch, batch_idx):

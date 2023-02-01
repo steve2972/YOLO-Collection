@@ -41,6 +41,20 @@ class YOLOv1Loss(nn.Module):
 
         self.device = device
 
+    def forward_v2(self, x:Tensor, gt_boxes:List[BoundingBox]):
+        """
+        Args:
+            x: (Tensor) YOLO output, sized [n_batch, S, S, Bx5+C] where 5=[cx,cy,w,h,conf]
+            boxes: (List[BoundingBox]) List of BoundingBoxes with length of list=n_batch
+        Returns:
+            (Tensor): loss, sized [1,]
+        """
+
+        boxes, labels, confidences, cls_scores = BoundingBox.decode_yolo(
+            x, self.S, self.B, self.C, conf_thresh=0.0, prob_thresh=0.0, device=self.device)
+
+        gt_boxes = deepcopy(gt_boxes)
+
 
     def forward(self, x:Tensor, boxes:List[BoundingBox]):
         """

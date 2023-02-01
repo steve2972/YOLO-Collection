@@ -1,19 +1,22 @@
 import torch
 from torch import Tensor
 
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 from Detection.Models import BoundingBox
+from Detection.Utils.utils import compute_iou
 # Adapted from https://github.com/sgrvinod/a-PyTorch-Tutorial-to-Object-Detection/blob/master/utils.py
-
-voc_labels = ('aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow', 'diningtable',
-              'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor')
-label_map = {k: v + 1 for v, k in enumerate(voc_labels)}
-label_map['background'] = 0
-rev_label_map = {v: k for k, v in label_map.items()}  # Inverse mapping
+voc_labels = (
+    'aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 
+    'car', 'cat', 'chair', 'cow', 'diningtable',
+    'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 
+    'sofa', 'train', 'tvmonitor'
+)
+label_map = {k: v for v, k in enumerate(voc_labels)}
+rev_label_map = {v: k for k, v in label_map.items()} 
 
 def calculate_voc_mAP(
-        detected: List[BoundingBox],
-        ground_truth: List[BoundingBox],
+        detected: List[Dict],
+        ground_truth: List[Dict],
         device="cpu"
         ) -> Tuple[List[Tensor], float]:
     """ Calculate the Mean Average Precision (mAP) of detected objects.
@@ -38,13 +41,13 @@ def calculate_voc_mAP(
     true_labels = []
     true_difficulties = []
     for box in detected:
-        bboxes, labels, scores = box.get_info("xyxy")
+        bboxes, labels, scores = box["boxes"], box["labels"], box["scores"]
         det_boxes.append(bboxes)
         det_labels.append(labels)
         det_scores.append(scores)
 
     for box in ground_truth:
-        bboxes, labels, scores = box.get_info("xyxy")
+        bboxes, labels, scores = box["boxes"], box["labels"], box["scores"]
         true_boxes.append(bboxes)
         true_labels.append(labels)
         true_difficulties.append(scores)
@@ -52,7 +55,7 @@ def calculate_voc_mAP(
     assert len(det_boxes) == len(det_labels) == len(det_scores)
     assert len(det_scores) == len(true_boxes) == len(true_labels) == len(true_difficulties)
 
-    n_classes = len(label_map)  # 20 classes for Pascal VOC
+    n_classes = 20  # 20 classes for Pascal VOC
 
     # Store all (true) objects in a single continuous tensor while keeping track of the image it is from
     true_images = list()
@@ -77,8 +80,8 @@ def calculate_voc_mAP(
     assert det_images.size(0) == det_boxes.size(0) == det_labels.size(0) == det_scores.size(0)
 
     # Calculate APs for each class (except background)
-    average_precisions = torch.zeros((n_classes - 1), dtype=torch.float, device=device)  # [n_classes - 1]
-    for c in range(1, n_classes):
+    average_precisions = torch.zeros((n_classes), dtype=torch.float, device=device)  # [n_classes]
+    for c in range(n_classes):
         # Extract only objects with this class
         true_class_images = true_images[true_labels == c]               # [n_class_objects,  ]
         true_class_boxes = true_boxes[true_labels == c]                 # [n_class_objects, 4]
@@ -117,7 +120,7 @@ def calculate_voc_mAP(
                 continue
 
             # Find maximum overlap of this detection with objects in this image of this class
-            overlaps = find_jaccard_overlap(this_detection_box, object_boxes)  # [1, n_class_objects_in_img]
+            overlaps = compute_iou(this_detection_box, object_boxes)  # [1, n_class_objects_in_img]
             max_overlap, ind = torch.max(overlaps.squeeze(0), dim=0)  # (), () - scalars
 
             # 'ind' is the index of the object in these image-level tensors 'object_boxes', 'object_difficulties'
@@ -156,50 +159,14 @@ def calculate_voc_mAP(
                 precisions[i] = cumul_precision[recalls_above_t].max()
             else:
                 precisions[i] = 0.
-        average_precisions[c - 1] = precisions.mean()  # c is in [1, n_classes - 1]
+        average_precisions[c] = precisions.mean()  # c is in [1, n_classes]
 
     # Calculate Mean Average Precision (mAP)
     mean_average_precision = average_precisions.mean().item()
 
     # Keep class-wise average precisions in a dictionary
-    average_precisions = {rev_label_map[c + 1]: v for c, v in enumerate(average_precisions.tolist())}
+    average_precisions = {rev_label_map[c]: v * 100 for c, v in enumerate(average_precisions.tolist())}
 
-    return average_precisions, mean_average_precision
+    return average_precisions, mean_average_precision * 100
 
-def find_intersection(set_1, set_2):
-    """ Find the intersection of every box combination between two sets of boxes that are in boundary coordinates.
-    Args:
-        set_1: set 1, a tensor of dimensions (n1, 4)
-        set_2: set 2, a tensor of dimensions (n2, 4)
-    Returns: 
-        Intersection of each of the boxes in set 1 with respect to each of the boxes in set 2, a tensor of dimensions (n1, n2)
-    """
-
-    # PyTorch auto-broadcasts singleton dimensions
-    lower_bounds = torch.max(set_1[:, :2].unsqueeze(1), set_2[:, :2].unsqueeze(0))  # (n1, n2, 2)
-    upper_bounds = torch.min(set_1[:, 2:].unsqueeze(1), set_2[:, 2:].unsqueeze(0))  # (n1, n2, 2)
-    intersection_dims = torch.clamp(upper_bounds - lower_bounds, min=0)  # (n1, n2, 2)
-    return intersection_dims[:, :, 0] * intersection_dims[:, :, 1]  # (n1, n2)
-
-
-def find_jaccard_overlap(set_1, set_2):
-    """ Find the Jaccard Overlap (IoU) of every box combination between two sets of boxes that are in boundary coordinates.
-    Args:
-        set_1: set 1, a tensor of dimensions (n1, 4)
-        set_2: set 2, a tensor of dimensions (n2, 4)
-    Returns: 
-        Jaccard Overlap of each of the boxes in set 1 with respect to each of the boxes in set 2, a tensor of dimensions (n1, n2)
-    """
-
-    # Find intersections
-    intersection = find_intersection(set_1, set_2)  # (n1, n2)
-
-    # Find areas of each box in both sets
-    areas_set_1 = (set_1[:, 2] - set_1[:, 0]) * (set_1[:, 3] - set_1[:, 1])  # (n1)
-    areas_set_2 = (set_2[:, 2] - set_2[:, 0]) * (set_2[:, 3] - set_2[:, 1])  # (n2)
-
-    # Find the union
-    # PyTorch auto-broadcasts singleton dimensions
-    union = areas_set_1.unsqueeze(1) + areas_set_2.unsqueeze(0) - intersection  # (n1, n2)
-
-    return intersection / union  # (n1, n2)
+ 
