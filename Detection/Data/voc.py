@@ -40,11 +40,18 @@ class VOCModule(lightning.LightningDataModule):
 class VOC(Dataset):
     """ Initializes both VOC 2007 and 2012 data as used in the original YOLO paper
     """
-    def __init__(self, root, split: str = "train", box_fmt: str = "cxcywh", resize: tuple = (448,448)):
+    def __init__(self, 
+            root: str, 
+            split: str = "train", 
+            box_fmt: str = "cxcywh", 
+            resize: tuple = (448,448),
+            device: str = "cuda"
+            ):
         assert split in {"train", "val"}
         self.split = split
-        self.voc2007 = VOCDetection(root, '2007', image_set=split)
+        self.device = device
         self.voc2012 = VOCDetection(root, '2012', image_set=split)
+        self.voc2007 = VOCDetection(root, '2007', image_set=split)
         self.voc2007_len = len(self.voc2007)
         self.voc2012_len = len(self.voc2012)
         self.out_fmt = box_fmt
@@ -96,7 +103,8 @@ class VOC(Dataset):
             difficulties=difficulties, 
             is_gt=True, 
             is_relative=False,
-            box_fmt = self.out_fmt
+            box_fmt = self.out_fmt,
+            device=self.device
         )
         return x, bbox
 
