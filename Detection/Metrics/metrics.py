@@ -3,7 +3,7 @@ from torch import Tensor
 
 from typing import List, Tuple, Dict
 from Detection.Models import BoundingBox
-from Detection.Utils.utils import compute_iou
+from Detection.Utils.bbox_utils import compute_iou
 # Adapted from https://github.com/sgrvinod/a-PyTorch-Tutorial-to-Object-Detection/blob/master/utils.py
 voc_labels = (
     'aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 
