@@ -234,10 +234,10 @@ class BoundingBox:
             cls_scores: (tensor) scores for most likely class for each detected box, sized [n_boxes,].
         """
         boxes, labels, confidences, cls_scores = [],[],[],[]
-        indexes = torch.zeros((S,S,2), device=device)  # Torch tensor of indexes (to calculate absolute position)
-        for i in range(S):
-            for j in range(S):
-                indexes[i,j] = torch.tensor([i,j], device=device).to(torch.long)
+        indexes = torch.zeros((S,S,2), device='cpu').to(torch.long)
+        indexes = torch.meshgrid(torch.arange(S), torch.arange(S))
+        indexes = torch.stack(indexes, dim=-1)
+        indexes = indexes.reshape(-1, 2)
 
         # n_obj = number of objects with confidence exceeding conf_thresh
         for b in range(B):
