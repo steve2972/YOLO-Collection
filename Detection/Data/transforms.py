@@ -4,7 +4,7 @@ import random
 
 from PIL import Image
 from typing import List
-from Detection.Utils.utils import compute_iou
+from Detection.Utils.bbox_utils import compute_iou
 
 from torchvision.transforms.transforms import (
     PILToTensor, ConvertImageDtype,
@@ -13,50 +13,7 @@ from torchvision.transforms.transforms import (
 )
 import torchvision.transforms.transforms as T
 
-#------------------------Image-only transforms------------------------#
 
-def distort(image):
-    ''' Distort brightness, contrast, saturation
-    Args:
-        image: A PIL image    
-    Returns:
-        (PIL Image)
-    '''
-    if type(image) != Image.Image:
-        image = F.to_pil_image(image)
-    new_image = image
-    distortions = [F.adjust_brightness,
-                  F.adjust_contrast,
-                  F.adjust_saturation]
-    
-    random.shuffle(distortions)
-    
-    for function in distortions:
-        if random.random() < 0.5:
-            adjust_factor = random.uniform(0.5, 1.5)
-            new_image = function(new_image, adjust_factor)
-            
-    return new_image
-
-def lighting_noise(image):
-    '''Color channel swap in image
-
-    Args:
-        image: A PIL image
-    Returns:
-        (PIL.Image) New image with swap channel (Probability = 0.5)
-    '''
-    if type(image) != Image.Image:
-        image = F.to_pil_image(image)
-    new_image = image
-    if random.random() < 0.5:
-        perms = ((0, 1, 2), (0, 2, 1), (1, 0, 2), 
-                 (1, 2, 0), (2, 0, 1), (2, 1, 0))
-        swap = perms[random.randint(0, len(perms)- 1)]
-        new_image = F.to_tensor(new_image)
-        new_image = new_image[swap, :, :]
-        new_image = F.to_pil_image(new_image)
-    return new_image
 
 #------------------------Image+Bbox transforms------------------------#
 
@@ -220,7 +177,7 @@ def random_flip(image, boxes):
         Out: flipped image (A PIL image), new boxes
     '''
     if type(image) != Image.Image:
-        image = F.to_pil_image(image)
+        raise ValueError("image should be a PIL image")
     if random.random() > 0.5:
         return image, boxes
     new_image = F.hflip(image)
@@ -232,9 +189,12 @@ def random_flip(image, boxes):
     new_boxes = new_boxes[:, [2, 1, 0, 3]]
     return new_image, new_boxes
 
+
+
+
 #------------------------Combine transforms------------------------#
 
-def transform(image, boxes, labels, difficulties, split, dims=(448,448), difficult=False):
+def transform(image, boxes, labels, difficulties, split, dims=(448,448)):
     ''' Apply transformation
 
     Args:
@@ -264,31 +224,15 @@ def transform(image, boxes, labels, difficulties, split, dims=(448,448), difficu
     new_difficulties = difficulties
     #Skip transform for VALing
     if split == "TRAIN":
-        if difficult:
-            #Apply distort image
-
-            new_image = distort(new_image)
-            
-            #Apply lighting noise
-            new_image = lighting_noise(new_image)
-            #Expand image
-            if random.random() < 0.5:
-                new_image, new_boxes = expand_filler(new_image, boxes, mean)
-            
-            #Random crop
-            new_image, new_boxes, new_labels, new_difficulties = random_crop(new_image, 
-                                                                            new_boxes, 
-                                                                            new_labels, new_difficulties)
-            
-            #Flip image
-            new_image, new_boxes = random_flip(new_image, new_boxes)
+        #Flip image
+        new_image, new_boxes = random_flip(new_image, new_boxes)
 
         # Random Augment
         augment = Compose([
             RandomAutocontrast(),
             RandomAdjustSharpness(0.5),
             T.RandomApply([
-                T.ColorJitter(),
+                T.ColorJitter(0.2, 0.2, 0.2, 0.2),
                 T.GaussianBlur((7,7)),
 
             ]),
@@ -297,8 +241,6 @@ def transform(image, boxes, labels, difficulties, split, dims=(448,448), difficu
         ])
         new_image = augment(new_image)
 
-    
-        
     new_image, new_boxes = resize(new_image, new_boxes, dims=dims, return_percent_coords=False)
 
     norm_transform = Compose([
