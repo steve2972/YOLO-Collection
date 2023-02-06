@@ -3,6 +3,7 @@ import wandb
 from pytorch_lightning.loggers import WandbLogger
 
 from Utils.parse_detection import args
+from Utils import detection_config
 from Detection.detection import YoloModule
 from Detection.Data.voc import VOCModule
 
