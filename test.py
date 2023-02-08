@@ -1,49 +1,11 @@
 import torch
+from Detection.Models import BoundingBox
+torch.set_printoptions(threshold=10_000)
 
-def encode_boxes(boxes, labels, grid_size, num_boxes:int=2, num_classes:int=20):
-    """Encodes a list of boxes in YOLO format with shape 
-        (grid_size, grid_size, 5xnum_boxes + num_classes)
-    
-    Args:
-        boxes -- a tensor of shape (B, 4) representing the boxes, where each box is represented by (xmin, ymin, xmax, ymax)
-        labels -- a tensor of shape (B,) representing the labels of the boxes
-        confidences -- a tensor of shape (B,) representing the confidence scores of the boxes
-        grid_size -- the size of the grid in each dimension
-    num_classes -- the number of classes in the dataset
-    
-    Returns:
-        output -- a tensor of shape (grid_size, grid_size, 30) representing the encoded boxes
+
+def decode_yolo_bboxes(bboxes, img_size):
     """
-    S = grid_size
-    B = boxes.shape[0]
-    output = torch.zeros((S, S, 30))
-    
-    cell_size = 1.0 / S
-    
-    cx = (boxes[:, 0] + boxes[:, 2]) / 2.0
-    cy = (boxes[:, 1] + boxes[:, 3]) / 2.0
-    w = boxes[:, 2] - boxes[:, 0]
-    h = boxes[:, 3] - boxes[:, 1]
-    
-    i = (cx / cell_size).floor().long()
-    j = (cy / cell_size).floor().long()
-    
-    i = torch.clamp(i, 0, S-1)
-    j = torch.clamp(j, 0, S-1)
-    
-    for b in range(B):
-        output[j[b], i[b], :2] = torch.tensor([cx[b] % cell_size, cy[b] % cell_size])
-        output[j[b], i[b], 2:4] = torch.tensor([w[b], h[b]])
-        output[j[b], i[b], 4] = 1
-        output[j[b], i[b], 5 + int(labels[b])] = 1.0
-        
-    return output
-
-import torch
-
-def decode_yolo_bboxes(bboxes, img_size, grid_size):
-    """
-    Decode YOLO format bounding boxes back to the original format.
+    Decode YOLO format bounding boxes back to the original format for a single image.
     
     Parameters:
     - bboxes: Tensor of shape (7, 7, 30) representing the YOLO format bounding boxes
@@ -53,32 +15,27 @@ def decode_yolo_bboxes(bboxes, img_size, grid_size):
     Returns:
     - decoded_bboxes: List of decoded bounding boxes with format [xmin, ymin, xmax, ymax, label, confidence]
     """
-
     bboxes = bboxes.view(-1, 30)
-    xy = torch.sigmoid(bboxes[..., :2])
-    wh = torch.exp(bboxes[..., 2:4])
-
-    print(wh)
-    obj_conf = torch.sigmoid(bboxes[..., 4:5])
-    class_conf = torch.sigmoid(bboxes[..., 5:])
-    bbox_xy = (xy + torch.arange(grid_size, dtype=torch.float32).view(-1, 1, 1) ) / grid_size
-    bbox_wh = wh * img_size / 2.0
-    xmin, ymin = (bbox_xy - bbox_wh) * img_size
-    xmax, ymax = (bbox_xy + bbox_wh) * img_size
-    conf, label = class_conf.max(1)
-    mask = obj_conf > 0.5
-    decoded_bboxes = torch.stack([xmin[mask], ymin[mask], xmax[mask], ymax[mask], label[mask], conf[mask]], dim=-1)
+    grid_size = 7
+    stride = img_size / grid_size
+    bbox_xy = torch.sigmoid(bboxes[:, :2]) * grid_size
+    bbox_wh = bboxes[:, 2:4]
+    xy_min = (bbox_xy - bbox_wh / 2) * stride
+    xy_max = (bbox_xy + bbox_wh / 2) * stride
+    confidences_classes = torch.sigmoid(bboxes[:, 5:]) * bboxes[:, 4:5]
+    conf, label = confidences_classes.max(dim=-1)
+    mask = conf > 0.5
+    decoded_bboxes = torch.stack([xy_min[mask, 0], xy_min[mask, 1], xy_max[mask, 0], xy_max[mask, 1], label[mask], conf[mask]], dim=-1)
     return decoded_bboxes
 
 
-boxes = torch.tensor([[0.1,0.2,0.3,0.25], [0.5,0.8,0.55,0.9]])
+
+boxes = torch.tensor([[100, 100, 200, 200], [250,250,300,350]])
 labels = torch.tensor([0,1])
+diffs = torch.tensor([1,1])
 
-output = encode_boxes(boxes, labels, 7)
-for i in range(7):
-    for j in range(7):
-        if output[i,j].sum() > 0:
-            print(i,j)
+bboxes = BoundingBox((448,448),boxes, labels, difficulties=diffs, is_gt=True, is_relative=False, box_fmt='xyxy')
+print(bboxes)
 
-boxes = decode_yolo_bboxes(output, (1,1), 7)
-print(boxes)
+bboxes.convert_boxtype('yolo')
+bboxes.convert_boxtype('xyxy')

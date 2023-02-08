@@ -11,6 +11,7 @@ voc_labels = (
     'sheep', 'sofa', 'train', 'tvmonitor'
 )
 
+
 class BoundingBox:
     def __init__(
         self,
@@ -44,16 +45,18 @@ class BoundingBox:
         if box_fmt not in avail_formats:
             raise ValueError(f"Parameter box_fmt must be one of {avail_formats} but received {box_fmt}.")
 
+        get_tensor = lambda x: torch.tensor(x, device=device) if isinstance(x, List) else x
+
         self.cur_format = box_fmt
         self.relative = is_relative
 
-        self.bboxes = torch.tensor(bboxes, device=device)
-        self.labels = torch.tensor(labels, device=device)
+        self.bboxes = get_tensor(bboxes)
+        self.labels = get_tensor(labels)
         self.gt = is_gt
         if is_gt:
-            self.difficulties = torch.tensor(difficulties, device=device)
+            self.difficulties = get_tensor(difficulties)
         else:
-            self.confidence = torch.tensor(confidence, device=device)
+            self.confidence = get_tensor(confidence)
         if image_size != None:
             self.width, self.height = image_size[0], image_size[1]
         else:
@@ -135,7 +138,7 @@ class BoundingBox:
             raise RuntimeError("Box format of 'yolo' must be relative")
         self.convert_boxtype("xyxy")
         wh = torch.tensor([self.width, self.height, self.width, self.height], device=self.device)
-        self.bboxes = self.bboxes.to(self.device)
+        self.bboxes = self.bboxes.to(self.device).to(torch.float)
         if self.relative:
             # Change boxes to absolute values
             self.bboxes *= wh
@@ -195,13 +198,13 @@ class BoundingBox:
 
         num_boxes = self.bboxes.shape[0]
         arange = torch.arange(num_boxes, device=self.device)
-        ret = torch.zeros((num_boxes, 5*B+C), device=self.device)
+        output = torch.zeros((num_boxes, 5*B+C), device=self.device)
 
         labels = self.labels.clone().to(torch.long)
         labels += 5*B   # Bounding box offset for class labels
         
         # ret in the format of [cx, cy, w, h, 1, 0*5, class indexes *20]
-        ret[arange, labels] = 1
+        output[arange, labels] = 1
         # NOTE: each bounding box coordinates for x,y are parameterized 
         # between 0 and 1 relative to the particular **grid cell**.
         r = self.bboxes[:,:2] * S
@@ -209,14 +212,14 @@ class BoundingBox:
 
         relative_xy = r - idxs
 
-        ret[arange, :2] = relative_xy.to(self.device)
-        ret[arange,2:4] = self.bboxes[:,2:4].to(self.device)
-        ret[arange,  4] = 1
+        output[arange, :2] = relative_xy.to(self.device)
+        output[arange,2:4] = self.bboxes[:,2:4].to(self.device)
+        output[arange,  4] = 1
         
         x,y = idxs[:,0], idxs[:,1]
         x,y = x.to(torch.long), y.to(torch.long)
 
-        target[x,y] = ret
+        target[x,y] = output
 
         return target
 
