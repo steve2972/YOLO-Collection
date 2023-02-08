@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 from torchvision import ops
 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List, Union
 
 voc_labels = (
     'aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 
@@ -15,10 +15,10 @@ class BoundingBox:
     def __init__(
         self,
         image_size: Tuple[int],
-        bboxes: Tensor,
-        labels: Tensor,
-        confidence: Optional[Tensor] = None,
-        difficulties: Optional[Tensor] = None,
+        bboxes: Union[List[float], Tensor],
+        labels: Union[List[int], Tensor],
+        confidence: Optional[Union[List[float], Tensor]] = None,
+        difficulties: Optional[Union[List[float], Tensor]] = None,
         is_gt: bool = False,
         is_relative: bool = True,
         box_fmt: str="cxcywh",
@@ -47,11 +47,13 @@ class BoundingBox:
         self.cur_format = box_fmt
         self.relative = is_relative
 
-        self.bboxes = bboxes
-        self.labels = labels
-        self.confidence = confidence
-        self.difficulties = difficulties
+        self.bboxes = torch.tensor(bboxes, device=device)
+        self.labels = torch.tensor(labels, device=device)
         self.gt = is_gt
+        if is_gt:
+            self.difficulties = torch.tensor(difficulties, device=device)
+        else:
+            self.confidence = torch.tensor(confidence, device=device)
         if image_size != None:
             self.width, self.height = image_size[0], image_size[1]
         else:
@@ -233,11 +235,12 @@ class BoundingBox:
             confidences: (tensor) objectness confidences for each detected box, sized [n_boxes,].
             cls_scores: (tensor) scores for most likely class for each detected box, sized [n_boxes,].
         """
+        print(preds.shape)
         boxes, labels, confidences, cls_scores = [],[],[],[]
-        indexes = torch.zeros((S,S,2), device='cpu').to(torch.long)
-        indexes = torch.meshgrid(torch.arange(S), torch.arange(S))
+        indexes = torch.meshgrid(torch.arange(S, device=device), torch.arange(S, device=device))
         indexes = torch.stack(indexes, dim=-1)
-        indexes = indexes.reshape(-1, 2)
+        indexes = indexes.reshape(-1, 2).to(torch.long)
+
 
         # n_obj = number of objects with confidence exceeding conf_thresh
         for b in range(B):

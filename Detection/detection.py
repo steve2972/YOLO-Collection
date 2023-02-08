@@ -1,43 +1,32 @@
 from Detection.Models import Yolo, BoundingBox
 from Detection.Metrics.loss import YOLOv1Loss as Loss
-from Detection.Metrics.metrics import calculate_voc_mAP
+from Detection.Metrics import calculate_voc_mAP
 from Utils import optim
 
 import lightning
-from typing import Tuple
-
 
 class YoloModule(lightning.LightningModule):
-    """ YOLO version 1 Module"""
-    def __init__(
-            self,
-            args = None,
-            input_size: Tuple[int, int] = (448, 448),
-            num_classes: int = 20,
-            num_bboxes: int = 2,
-            num_patches: int = 7):
+    def __init__(self, config:object = None):
         super().__init__()
-        self.input_size = input_size
-        self.C = num_classes
-        self.B = num_bboxes
-        self.S = num_patches
-        self.model = Yolo(
-            args, 
-            input_size=self.input_size, 
-            num_classes=self.C, 
-            num_bboxes=self.B, 
-            num_patches=self.S
-        )
-        self.criterion = Loss(num_patches, num_bboxes, num_classes)
-        self.args = args
+        if config:
+            self.config=config
+            input_size=(config.resize, config.resize)
+            S, B, C = config.patches, config.bboxes, config.classes
+        else:
+            self.config = None
+            input_size=(448,448)
+            S, B, C = 7, 2, 20
+            
+        self.model = Yolo(input_size, S, B, C, backbone="Darknet", pretrained=True)
+        self.criterion = Loss(S, B, C, lambda_coord=5, lambda_noobj=0.5)
 
     def forward(self, x):
         x = self.model(x)
         return x
 
     def configure_optimizers(self):
-        optimizer = optim.get_optimizer(self.parameters(), self.args)
-        lr_scheduler = optim.get_scheduler(optimizer, self.args)
+        optimizer = optim.get_optimizer(self.parameters(), config=self.config)
+        lr_scheduler = optim.get_scheduler(optimizer, config=self.config)
 
         return [optimizer], [lr_scheduler]
 
@@ -46,8 +35,10 @@ class YoloModule(lightning.LightningModule):
             x: (Tensor)
             boxes: (List[BoundingBox])
         """
+
         x, boxes = batch
         y = self(x)
+
         loss = self.criterion(y, boxes)
         self.log(
             f"{prefix}_loss", 
@@ -57,10 +48,10 @@ class YoloModule(lightning.LightningModule):
             batch_size=x.shape[0]
         )
 
-        preds = [BoundingBox(None, pred, None, box_fmt="yolo") for pred in y]
+        preds = [BoundingBox.decode_yolo(pred) for pred in y]
         preds = [box.get_dict("xyxy") for box in preds]
         target= [box.get_dict("xyxy") for box in boxes]
-        ap, mAP = calculate_voc_mAP(preds, target, device="cuda")
+        ap, mAP = calculate_voc_mAP(preds, target, device='cuda')
         if prefix == "val":
             self.log_dict(ap, batch_size=x.shape[0])
         self.log(

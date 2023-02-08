@@ -12,10 +12,10 @@ import numpy as np
 
 
 class VOCModule(lightning.LightningDataModule):
-    def __init__(self, args, box_fmt: str = "cxcywh", resize_size: int = 448):
+    def __init__(self, cfg, box_fmt: str = "cxcywh", resize_size: int = 448):
         super().__init__()
-        self.args = args
-        self.root = "/home/hyperai1/jhsong/Data/VOC"
+        self.args = cfg
+        self.root = cfg.data_path
         self.box_fmt = box_fmt
         # mean and std from ImageNet
         self.resize_size = (resize_size, resize_size)

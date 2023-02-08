@@ -4,26 +4,38 @@ from torch.optim.lr_scheduler import _LRScheduler
 """
     Gradient optimizers
 """
-def get_optimizer(parameters, args):
-    opt_name = args.opt.lower()
+def get_optimizer(
+    parameters, 
+    opt:str='sgd', 
+    alpha:float=0.9,
+    lr:float=1e-3, 
+    momentum:float=0.9, 
+    weight_decay:float=1e-4,
+    config:object = None):
+    opt_name = opt.lower()
+    if config:
+        opt_name = config.optimizer
+        alpha = config.opt_alpha
+        lr       = config.learning_rate
+        momentum = config.opt_momentum
+        weight_decay = config.weight_decay
     if opt_name == "sgd":
         optimizer = torch.optim.SGD(
             parameters,
-            lr=args.lr,
-            momentum=args.momentum,
-            weight_decay=args.weight_decay,
-            nesterov="nesterov" in opt_name,
+            lr=lr,
+            momentum=momentum,
+            weight_decay=weight_decay,
         )
     elif opt_name == "rmsprop":
         optimizer = torch.optim.RMSprop(
-            parameters, lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay, eps=0.0316, alpha=0.9
+            parameters, lr=lr, alpha=alpha, momentum=momentum, weight_decay=weight_decay
         )
     elif opt_name == "adamw":
-        optimizer = torch.optim.AdamW(parameters, lr=args.lr, weight_decay=args.weight_decay)
+        optimizer = torch.optim.AdamW(parameters, lr=lr, weight_decay=weight_decay)
     elif opt_name == "adam":
-        optimizer = torch.optim.Adam(parameters, lr=args.lr, weight_decay=args.weight_decay)
+        optimizer = torch.optim.Adam(parameters, lr=lr, weight_decay=weight_decay)
     else:
-        raise RuntimeError(f"Invalid optimizer {args.opt}. Only SGD, RMSprop, and Adam are supported.")
+        raise ValueError(f"Invalid optimizer {opt}. Only SGD, RMSprop, and Adam are supported.")
 
     return optimizer
 
@@ -31,21 +43,29 @@ def get_optimizer(parameters, args):
     Learning rate schedulers
 """
 
-def get_scheduler(optimizer, args):
-    args.lr_scheduler = args.lr_scheduler.lower()
-    if args.lr_scheduler == "steplr":
-        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=args.lr_gamma)
-    elif args.lr_scheduler == "cosineannealinglr":
+def get_scheduler(optimizer, lr_scheduler:str="steplr", lr_gamma:float=0.1, lr_min:float=1e-5, epochs:int=100, lr_warmup_epochs:int=5, lr_power:float=4, step_size:int=2, config:object = None):
+    lr_scheduler = lr_scheduler.lower()
+    if config:
+        lr_scheduler = config.scheduler
+        lr_gamma = config.lr_gamma
+        lr_min = config.lr_min
+        epochs = config.epochs
+        lr_warmup_epochs = config.lr_warmup_epochs
+        lr_power = config.lr_power
+        step_size = config.step_size
+    if lr_scheduler == "steplr":
+        lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=lr_gamma)
+    elif lr_scheduler == "cosineannealinglr":
         lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=args.epochs - args.lr_warmup_epochs, eta_min=args.lr_min
+            optimizer, T_max=epochs - lr_warmup_epochs, eta_min=lr_min
         )
-    elif args.lr_scheduler == "exponentiallr":
-        lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=args.lr_gamma)
-    elif args.lr_scheduler =="polynomial":
-        lr_scheduler = PolynomialLRDecay(optimizer, max_decay_steps=args.epochs, end_learning_rate=args.lr_min, power=args.lr_power)
+    elif lr_scheduler == "exponentiallr":
+        lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=lr_gamma)
+    elif lr_scheduler =="polynomial":
+        lr_scheduler = PolynomialLRDecay(optimizer, max_decay_steps=epochs, end_learning_rate=lr_min, power=lr_power)
     else:
-        raise RuntimeError(
-            f"Invalid lr scheduler '{args.lr_scheduler}'. Only StepLR, CosineAnnealingLR, Polynomial and ExponentialLR "
+        raise ValueError(
+            f"Invalid lr scheduler '{lr_scheduler}'. Only StepLR, CosineAnnealingLR, Polynomial and ExponentialLR "
             "are supported."
         )
 

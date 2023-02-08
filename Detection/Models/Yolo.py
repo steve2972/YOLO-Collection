@@ -9,19 +9,13 @@ from einops.layers.torch import Rearrange
 class Yolo(nn.Module):
     def __init__(
         self,
-        args = None,
         input_size: Tuple[int, int] = (448, 448),
-        num_classes: int = 20,
-        num_bboxes: int = 2,
         num_patches: int = 7,
+        num_bboxes: int = 2,
+        num_classes: int = 20,
         backbone: str = "Darknet",
         pretrained: bool = True):
         super().__init__()
-        if args:
-            num_classes = args.classes
-            num_bboxes = args.bboxes
-            num_patches = args.patches
-            backbone = args.backbone
         self.backbone = load_model(model_name=backbone, load_head=False, pretrained=pretrained)
 
         self.conv = nn.Sequential(

@@ -1,12 +1,12 @@
 class detection_config(object):
-    data_path:str = "/home/hyperai1/jhsong/Data/ImageNet"
+    data_path:str = "/home/hyperai1/jhsong/Data/VOC"
 
     # Darknet version [0: Tiny, 1: Darknet24, 2: Darknet19, 3:Darknet53 ]
     model:int = 1
     device:str = 'gpu'
-    gpus:int = 4
+    gpus:int = 1
     test_only:bool = False
-    verbose:bool = False
+    verbose:bool = True
     activation:str = "leaky"
     classes:int = 20
     
@@ -24,17 +24,20 @@ class detection_config(object):
     epochs:int = 200
     workers:int = 16
 
-    # Optimizer parameters
-    opt:str = "sgd"
-    momentum:float = 0.9
-    weight_decay:float = 1e-4
+   # Optimizer parameters
+    optimizer:str = "sgd"
+    learning_rate:float = 0.256
+    opt_momentum:float = 0.9
+    opt_alpha:float = 0.9
+    weight_decay:float = 0.0005
 
-    lr:float = 0.3
-    lr_scheduler:str = "steplr"
-    lr_step_size:int = 2
-    lr_gamma:float = 0.1
-    lr_power:int = 4
+    # Scheduler parameters
+    scheduler:str="steplr"
+    lr_gamma:float = 0.97
     lr_min:float = 1e-5
+    lr_warmup_epochs:int = 5
+    lr_power:float = 4
+    step_size:int=2
 
     # Logging
     wandb:bool = False
