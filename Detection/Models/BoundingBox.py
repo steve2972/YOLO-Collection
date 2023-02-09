@@ -226,8 +226,8 @@ class BoundingBox:
     @staticmethod
     def decode_yolo(
         preds, S:int=7, B:int=2, C:int=20,
-        conf_thresh:float = 0.1,
-        prob_thresh:float = 0.1,
+        conf_thresh:float = 0.5,
+        prob_thresh:float = 0.0,
         device:str = 'cuda'
         ):
         """ Decode YOLO v1 tensor into box coordinates, class labels, and probs_detected. (Single Image Use-Case)
@@ -238,7 +238,6 @@ class BoundingBox:
             confidences: (tensor) objectness confidences for each detected box, sized [n_boxes,].
             cls_scores: (tensor) scores for most likely class for each detected box, sized [n_boxes,].
         """
-        print(preds.shape)
         boxes, labels, confidences, cls_scores = [],[],[],[]
         indexes = torch.meshgrid(torch.arange(S, device=device), torch.arange(S, device=device))
         indexes = torch.stack(indexes, dim=-1)
@@ -247,9 +246,9 @@ class BoundingBox:
 
         # n_obj = number of objects with confidence exceeding conf_thresh
         for b in range(B):
-            conf = preds[...,b*5+4] > conf_thresh                   # [n_obj, S, S]
-            conf_mask = conf.unsqueeze(-1).expand_as(preds)         # [n_obj, S, S, 5xB+C]
-            conf_index_mask = conf.unsqueeze(-1).expand_as(indexes) # [n_obj, S, S, 2]
+            conf = preds[...,b*5+4] > conf_thresh                   # [S, S]
+            conf_mask = conf.unsqueeze(-1).expand_as(preds)         # [S, S, 5xB+C]
+            conf_index_mask = conf.flatten()                        # [SxS,]
             
             # Get objects with confidence > threshold
             masked_preds = preds[conf_mask].view(-1, 5*B+C)         # [n_obj, 5xB+C]
