@@ -3,6 +3,7 @@ from torch import Tensor
 from torchvision import ops
 
 from typing import Optional, Tuple, List, Union
+from Detection.Utils.yolo_utils import encode_bbox2yolo, decode_yolo2bbox
 
 voc_labels = (
     'aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 
@@ -135,7 +136,8 @@ class BoundingBox:
         # Converts abolute boxes to relative format or vice versa.
         cur_format = self.cur_format
         if cur_format == "yolo":
-            raise RuntimeError("Box format of 'yolo' must be relative")
+            print("Box format of 'yolo' must be relative. Ignoring change.")
+            return
         self.convert_boxtype("xyxy")
         wh = torch.tensor([self.width, self.height, self.width, self.height], device=self.device)
         self.bboxes = self.bboxes.to(self.device).to(torch.float)
@@ -165,145 +167,26 @@ class BoundingBox:
             return
         if self.cur_format == "yolo":
             assert self.relative
-            n_boxes, n_labels, n_confidences, _ = self.decode_yolo(self.bboxes, device=self.device)
+            n_boxes, n_labels, n_scores = decode_yolo2bbox(self.bboxes, device=self.device)
             self.bboxes = n_boxes
             self.labels = n_labels
-            self.confidence = n_confidences
+            self.confidence = n_scores
             self.cur_format = "cxcywh"
         
         if out_fmt == "yolo":
-            n_boxes = self.encode_yolo()
+            assert self.gt
+            n_boxes = encode_bbox2yolo(self.bboxes, self.labels, device=self.device)
         elif out_fmt != "yolo":
             n_boxes = ops.box_convert(self.bboxes, self.cur_format, out_fmt)
 
         self.bboxes = n_boxes
         self.cur_format = out_fmt
         return n_boxes
-
-    def encode_yolo(self, S:int=7, B:int=2, C:int=20):
-        """ Encodes boxes and labels into a YOLO ver. 1 format.
-        NOTE: encoding bounding boxes (such as grounding truth boxes) may lead to
-        data loss since the number of bounding boxes is limited to the patch size.
-        For example, if two objects have center coordinates in the same patch, only
-        one of the objects will be properly encoded into YOLO format.
-
-        Returns:
-            (Tensor[S, S, Bx5+C]) In the same format as YOLOv1 outputs
-        """
-        if not self.relative:
-            self.change_relative()
-        self.convert_boxtype("cxcywh")
-
-        target = torch.zeros((S,S,5*B+C), device=self.device)
-
-        num_boxes = self.bboxes.shape[0]
-        arange = torch.arange(num_boxes, device=self.device)
-        output = torch.zeros((num_boxes, 5*B+C), device=self.device)
-
-        labels = self.labels.clone().to(torch.long)
-        labels += 5*B   # Bounding box offset for class labels
-        
-        # ret in the format of [cx, cy, w, h, 1, 0*5, class indexes *20]
-        output[arange, labels] = 1
-        # NOTE: each bounding box coordinates for x,y are parameterized 
-        # between 0 and 1 relative to the particular **grid cell**.
-        r = self.bboxes[:,:2] * S
-        idxs = self.bboxes[:,:2] // (1./S)
-
-        relative_xy = r - idxs
-
-        output[arange, :2] = relative_xy.to(self.device)
-        output[arange,2:4] = self.bboxes[:,2:4].to(self.device)
-        output[arange,  4] = 1
-        
-        x,y = idxs[:,0], idxs[:,1]
-        x,y = x.to(torch.long), y.to(torch.long)
-
-        target[x,y] = output
-
-        return target
-
-    @staticmethod
-    def decode_yolo(
-        preds, S:int=7, B:int=2, C:int=20,
-        conf_thresh:float = 0.5,
-        prob_thresh:float = 0.0,
-        device:str = 'cuda'
-        ):
-        """ Decode YOLO v1 tensor into box coordinates, class labels, and probs_detected. (Single Image Use-Case)
-        Returns:
-            boxes: (tensor) [[x1, y1, x2, y2]_obj1, ...]. Normalized from 0.0 to 1.0 w.r.t. 
-                    image width/height, sized [n_boxes, 4].
-            labels: (tensor) class labels for each detected box, sized [n_boxes,].
-            confidences: (tensor) objectness confidences for each detected box, sized [n_boxes,].
-            cls_scores: (tensor) scores for most likely class for each detected box, sized [n_boxes,].
-        """
-        boxes, labels, confidences, cls_scores = [],[],[],[]
-        indexes = torch.meshgrid(torch.arange(S, device=device), torch.arange(S, device=device))
-        indexes = torch.stack(indexes, dim=-1)
-        indexes = indexes.reshape(-1, 2).to(torch.long)
-
-
-        # n_obj = number of objects with confidence exceeding conf_thresh
-        for b in range(B):
-            conf = preds[...,b*5+4] > conf_thresh                   # [S, S]
-            conf_mask = conf.unsqueeze(-1).expand_as(preds)         # [S, S, 5xB+C]
-            conf_index_mask = conf.flatten()                        # [SxS,]
-            
-            # Get objects with confidence > threshold
-            masked_preds = preds[conf_mask].view(-1, 5*B+C)         # [n_obj, 5xB+C]
-            masked_indexes=indexes[conf_index_mask].view(-1,2)      # [n_obj, 2]
-
-            class_score, class_label = torch.max(
-                masked_preds[...,5*B:], -1)     # [n_obj,], [n_obj,]
-            conf_scores = masked_preds[...,b*5+4]                   # [n_obj,]
-
-            # Get objects with object probability > threshold => n_prob
-            prob = conf_scores * class_score                        # [n_obj,]
-            prob = prob > prob_thresh
-            class_score = class_score[prob]                         # [n_prob,]
-            class_label = class_label[prob]                         # [n_prob,]
-            conf_scores = conf_scores[prob]                         # [n_prob,]
-            prob_idx = prob.unsqueeze(-1).expand_as(masked_indexes) # [n_obj, 2]
-            prob = prob.unsqueeze(-1).expand_as(masked_preds)       # [n_obj, 5xB+C]
-            
-            masked_preds = masked_preds[prob].view(-1, 5*B+C)       # [n_prob, 5xB+C]
-            masked_indexes=masked_indexes[prob_idx].view(-1,2)      # [n_prob, 2]
-
-            bboxes = masked_preds[...,b*5:b*5+4]                    # [n_prob, 4]
-            # Box format in cx,cy,w,h. 
-            # Note that cx,cy are normalized to the cell-size, not the entire image.
-            # Thus, we normalize the coords from 0 to 1.0 w.r.t. image width/height
-            xy_normalized = (bboxes[...,:2] + masked_indexes) / S
-            pred_xyxy = torch.zeros_like(bboxes, device=device)
-            pred_xyxy[...,:2] = xy_normalized
-            pred_xyxy[...,2:4] = bboxes[...,2:4]
-
-            # Append the results to the lists
-            boxes.append(pred_xyxy)
-            labels.append(class_label)
-            confidences.append(conf_scores)
-            cls_scores.append(class_score)
-
-        if len(boxes) > 0:
-            boxes = torch.cat(boxes, dim=0)
-            labels = torch.cat(labels, dim=0)
-            confidences = torch.cat(confidences, dim=0)
-            cls_scores = torch.cat(cls_scores, dim=0)
-        
-        else:
-            boxes = torch.zeros((1,4))
-            labels = torch.zeros(1)
-            confidences = torch.zeros(1)
-            cls_scores = torch.zeros(1)
-        
-        return boxes, labels, confidences, cls_scores
-
+    
     def __len__(self) -> int:
         return len(self.labels)
 
     def __str__(self) -> str:
-        
         if self.cur_format == "yolo":
             bboxes = self.bboxes[...,:4]
         else: bboxes = self.bboxes
