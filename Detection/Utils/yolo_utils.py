@@ -1,4 +1,5 @@
 import torch
+from torchvision.ops import box_convert
 
 def encode_bbox2yolo(
         bboxes, 
@@ -18,6 +19,8 @@ def encode_bbox2yolo(
     Returns:
         yolo format, shape=(cell_size, cell_size, 5+num_classes)
     """
+    bboxes = bboxes.to(device)
+    labels = labels.to(device)
     yolo = torch.zeros((cell_size, cell_size, 5*box_per_cell+num_classes), device=device)
 
     x1, y1, x2, y2 = bboxes[:, 0], bboxes[:, 1], bboxes[:, 2], bboxes[:, 3]
@@ -34,7 +37,7 @@ def encode_bbox2yolo(
     yolo[x_cell, y_cell, 2] = w / cell_size
     yolo[x_cell, y_cell, 3] = h / cell_size
     yolo[x_cell, y_cell, 4] = 1
-    yolo[x_cell, y_cell, 5*box_per_cell+labels] = 1
+    yolo[x_cell, y_cell, 5*box_per_cell+labels.long()] = 1
     return yolo
     
 def decode_yolo2bbox(
@@ -43,7 +46,10 @@ def decode_yolo2bbox(
         box_per_cell:int=2, 
         num_classes:int=20,
         conf_thresh:float=0.5,
-        device:str = 'cuda'):
+        device:str = 'cuda',
+        relative:bool = True,
+        image_size:tuple = (448, 448),
+        box_fmt:str="xyxy"):
     """ Decodes a yolo encoding into three tensors containing the bounding boxes, labels and scores
     Args:
         encoding: (Tensor) yolo encoding, shape=(cell_size, cell_size, 5*box_per_cell+num_classes)
@@ -92,4 +98,30 @@ def decode_yolo2bbox(
     boxes = torch.cat(boxes, dim=0)
     labels = torch.cat(labels, dim=0)
     scores = torch.cat(scores, dim=0)
+    boxes = box_convert(boxes, in_fmt="cxcywh", out_fmt=box_fmt)
+    if not relative:
+        boxes[:, 0::2] *= image_size[0]
+        boxes[:, 1::2] *= image_size[1]
     return boxes, labels, scores
+
+def decode_yolo2dict(
+        encoding, 
+        cell_size:int=7, 
+        box_per_cell:int=2, 
+        num_classes:int=20,
+        conf_thresh:float=0.5,
+        device:str = 'cuda',
+        box_fmt:str="xyxy",
+        relative:bool = True,
+        image_size:tuple = (448, 448)):
+
+
+    boxes, labels, scores = decode_yolo2bbox(encoding, cell_size, box_per_cell, num_classes, conf_thresh, device, relative, image_size, box_fmt)
+
+    ret = {
+        'boxes': boxes,
+        'labels': labels,
+        'scores': scores
+    }
+
+    return ret

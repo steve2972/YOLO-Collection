@@ -1,6 +1,10 @@
 from Detection.Models import Yolo, BoundingBox
 from Detection.Metrics.loss import YOLOv1Loss as Loss
 from Detection.Metrics import calculate_voc_mAP
+from Detection.Utils.yolo_utils import decode_yolo2dict
+
+from torch.optim.lr_scheduler import SequentialLR, ConstantLR, StepLR
+
 from Utils import optim
 
 import lightning
@@ -10,10 +14,12 @@ class YoloModule(lightning.LightningModule):
         super().__init__()
         if config:
             self.config=config
+            self.verbose = config.verbose
             input_size=(config.resize, config.resize)
             S, B, C = config.patches, config.bboxes, config.classes
         else:
             self.config = None
+            self.verbose = True
             input_size=(448,448)
             S, B, C = 7, 2, 20
             
@@ -21,7 +27,7 @@ class YoloModule(lightning.LightningModule):
         self.criterion = Loss(S, B, C, lambda_coord=5, lambda_noobj=0.5)
 
     def forward(self, x):
-        x = self.model(x)
+        x = self.model.encode(x)
         return x
 
     def configure_optimizers(self):
@@ -48,10 +54,21 @@ class YoloModule(lightning.LightningModule):
             batch_size=x.shape[0]
         )
 
-        preds = [BoundingBox.decode_yolo(pred) for pred in y]
-        preds = [box.get_dict("xyxy") for box in preds]
+        #--------- Calculate mAP ---------#
+
+        preds = [
+            decode_yolo2dict(
+                pred, 
+                conf_thresh=0.2,
+                relative=False,
+                image_size=box.image_size
+            ) 
+            for pred, box in zip(y, boxes)
+        ]
         target= [box.get_dict("xyxy") for box in boxes]
+
         ap, mAP = calculate_voc_mAP(preds, target, device='cuda')
+
         if prefix == "val":
             self.log_dict(ap, batch_size=x.shape[0])
         self.log(
@@ -64,7 +81,7 @@ class YoloModule(lightning.LightningModule):
             batch_size=x.shape[0]
         )
 
-        if batch_idx % 10 == 0 and self.args.verbose:
+        if batch_idx % 10 == 0 and self.verbose:
             self.print("\n\n#", "="*20, "PREDICTION", "="*20,  "#")
             tmp = preds[0]
             bboxes = tmp['boxes']

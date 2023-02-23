@@ -26,7 +26,7 @@ class detection_config(object):
 
    # Optimizer parameters
     optimizer:str = "sgd"
-    learning_rate:float = 0.256
+    learning_rate:float = 0.0003
     opt_momentum:float = 0.9
     opt_alpha:float = 0.9
     weight_decay:float = 0.0005
@@ -43,6 +43,7 @@ class detection_config(object):
     wandb:bool = False
     wandb_id:str = "yolov1"
 
-    log_freq:int = 50
+    log_freq:int = 5
     output_dir:str = "./Logs"
     resume:str = None
+    verbose:bool = False

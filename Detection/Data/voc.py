@@ -43,7 +43,7 @@ class VOC(Dataset):
     def __init__(self, 
             root: str, 
             split: str = "train", 
-            box_fmt: str = "cxcywh", 
+            box_fmt: str = "xyxy", 
             resize: tuple = (448,448),
             device: str = "cuda"
             ):
@@ -70,6 +70,8 @@ class VOC(Dataset):
     def __getitem__(self, idx):
         if idx < self.voc2007_len: x, y = self.voc2007[idx]
         else: x, y = self.voc2012[idx - self.voc2007_len]
+
+        width, height = x.size
         y = y['annotation']['object']
 
         boxes = []
@@ -97,7 +99,7 @@ class VOC(Dataset):
 
 
         bbox = BoundingBox(
-            self.resize, 
+            (width, height),
             bboxes, 
             labels, 
             difficulties=difficulties, 

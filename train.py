@@ -20,7 +20,7 @@ def main():
             project="Yolo Detection",
             save_dir=cfg.output_dir
         )
-    else: wandb_logger = False
+    else: wandb_logger = None
 
     if cfg.gpus > 1: strategy = 'ddp'
     else: strategy = None

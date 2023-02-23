@@ -22,7 +22,7 @@ class BoundingBox:
         confidence: Optional[Union[List[float], Tensor]] = None,
         difficulties: Optional[Union[List[float], Tensor]] = None,
         is_gt: bool = False,
-        is_relative: bool = True,
+        is_relative: bool = False,
         box_fmt: str="cxcywh",
         device="cuda"
         ) -> None:
@@ -59,8 +59,10 @@ class BoundingBox:
         else:
             self.confidence = get_tensor(confidence)
         if image_size != None:
+            self.image_size = image_size
             self.width, self.height = image_size[0], image_size[1]
         else:
+            self.image_size = (448,448)
             self.width = self.height = 448
         self.device = device
          
@@ -175,6 +177,9 @@ class BoundingBox:
         
         if out_fmt == "yolo":
             assert self.gt
+            self.convert_boxtype("xyxy")
+            if not self.relative:
+                self.change_relative()
             n_boxes = encode_bbox2yolo(self.bboxes, self.labels, device=self.device)
         elif out_fmt != "yolo":
             n_boxes = ops.box_convert(self.bboxes, self.cur_format, out_fmt)
