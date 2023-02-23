@@ -53,6 +53,3 @@ Thumbs.db
 # Weights are too heavy to upload to git
 # Add implementation to download from google drive
 *.pt
-
-# Exclude jupyter notebooks for now
-*.ipynb
