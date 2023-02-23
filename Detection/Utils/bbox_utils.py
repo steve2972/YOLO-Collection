@@ -25,15 +25,13 @@ def compute_iou(boxes1, boxes2):
         Jaccard Overlap of each of the boxes in set 1 with respect to each of the boxes in set 2, a tensor of dimensions (n1, n2)
     """
 
-    # Find intersections
     intersection = find_intersection(boxes1, boxes2)  # (n1, n2)
 
-    # Find areas of each box in both sets
-    areas_boxes1 = (boxes1[:, 2] - boxes1[:, 0]) * (boxes1[:, 3] - boxes1[:, 1])  # (n1)
-    areas_boxes2 = (boxes2[:, 2] - boxes2[:, 0]) * (boxes2[:, 3] - boxes2[:, 1])  # (n2)
+    areas1 = (boxes1[:, 2] - boxes1[:, 0]) * (boxes1[:, 3] - boxes1[:, 1])  # (n1)
+    areas2 = (boxes2[:, 2] - boxes2[:, 0]) * (boxes2[:, 3] - boxes2[:, 1])  # (n2)
 
-    # Find the union
-    # PyTorch auto-broadcasts singleton dimensions
-    union = areas_boxes1.unsqueeze(1) + areas_boxes2.unsqueeze(0) - intersection  # (n1, n2)
+    union = areas1.unsqueeze(1) + areas2.unsqueeze(0) - intersection  # (n1, n2)
 
-    return intersection / union  # (n1, n2)
+    return intersection / (union + 1e-8)
+
+

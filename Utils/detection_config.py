@@ -26,7 +26,7 @@ class detection_config(object):
 
    # Optimizer parameters
     optimizer:str = "sgd"
-    learning_rate:float = 0.0003
+    learning_rate:float = 1e-3
     opt_momentum:float = 0.9
     opt_alpha:float = 0.9
     weight_decay:float = 0.0005

@@ -29,8 +29,8 @@ def main():
         accelerator=cfg.device, 
         devices=cfg.gpus, 
         max_epochs=cfg.epochs,
-        default_root_dir=cfg.output_dir,
-        logger=wandb_logger,
+        # default_root_dir=cfg.output_dir,
+        # logger=wandb_logger,
         strategy=strategy,
         enable_progress_bar= True#not cfg.wandb
     )

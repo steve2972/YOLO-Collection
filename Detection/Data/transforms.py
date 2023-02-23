@@ -230,13 +230,13 @@ def transform(image, boxes, labels, difficulties, split, dims=(448,448)):
         # Random Augment
         augment = Compose([
             RandomAutocontrast(),
-            RandomAdjustSharpness(0.5),
+            RandomAdjustSharpness(0.2),
             T.RandomApply([
-                T.ColorJitter(0.2, 0.2, 0.2, 0.2),
+                T.ColorJitter(0.1, 0.1, 0.1, 0.1),
                 T.GaussianBlur((7,7)),
 
             ]),
-            T.RandomPosterize(bits=2),
+            T.RandomPosterize(bits=4),
             T.RandomEqualize()
         ])
         new_image = augment(new_image)

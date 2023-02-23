@@ -126,7 +126,7 @@ class YOLOv1Loss(nn.Module):
 
         # bbox location/size and objectness loss for the response boxes
         bbox_pred_response = bbox_pred[coord_response_mask].view(-1,5)      # [n_response, 5]
-        bbox_pred_response.clamp(1e-6, 1-1e-6)
+        bbox_pred_response = bbox_pred_response.clamp(1e-6, 1-1e-6)
         bbox_target_response = bbox_target[coord_response_mask].view(-1,5)  # [n_response, 5], only the first 4 used
         target_iou = bbox_target_iou[coord_response_mask].view(-1,5)        # [n_response, 5]
 
@@ -155,7 +155,15 @@ class YOLOv1Loss(nn.Module):
         loss_noobj = nn.MSELoss(reduction="sum")(noobj_pred_conf, noobj_target_conf)
 
         # -------Total loss --------#
-        # print(loss_xy, loss_wh, loss_obj, loss_noobj, loss_class)
         loss = lambda_coord * (loss_xy + loss_wh) + loss_obj + lambda_noobj * loss_noobj + loss_class
+        if loss == float('inf') or loss == float('-inf') or not 0 <= loss <= 1e10:
+            print("loss_xy: ", loss_xy.item())
+            print("loss_wh: ", loss_wh.item())
+            print("loss_obj: ", loss_obj.item())
+            print("loss_noobj: ", loss_noobj.item())
+            print("loss_class: ", loss_class.item())
+            print("loss: ", loss.item())
+            
+            exit()
 
         return loss / batch_size
